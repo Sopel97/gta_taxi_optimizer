@@ -69,7 +69,8 @@ namespace gtasa_taxi_sim
 		double endTemperature = 1.0;
 		double endTemperatureAfter = 0.67;
 		std::uint64_t numFaresToComplete = 50;
-		std::uint64_t numBatches = 100;
+		std::uint64_t numBatches = 10;
+		std::uint64_t numTemperatureStages = 100;
 		std::uint64_t numAveragedSimulations = 100;
 
 		[[nodiscard]] static OptimizationParameters fromStream(std::istream& in)
@@ -103,6 +104,10 @@ namespace gtasa_taxi_sim
 				else if (token == "num_batches"sv)
 				{
 					in >> params.numBatches;
+				}
+				else if (token == "num_temperature_stages"sv)
+				{
+					in >> params.numTemperatureStages;
 				}
 				else if (token == "num_averaged_simulations"sv)
 				{
@@ -345,29 +350,32 @@ namespace gtasa_taxi_sim
 			auto bestResult = prevResult;
 			auto bestState = *this;
 
-			for (std::uint64_t i = 0; i < params.numBatches; ++i)
+			for (std::uint64_t batchId = 0; batchId < params.numBatches; ++batchId)
 			{
-				const double t = static_cast<double>(i) / (params.numBatches - 1);
-
-				const double temperature =
-					t > params.endTemperatureAfter
-					? params.endTemperature
-					: (params.endTemperatureAfter - t) / params.endTemperatureAfter * params.startTemperature + t * params.endTemperature;
-
-				auto newResult = optimizeSingleBatch(params, prevResult, temperature, rng);
-
-				if (newResult.totalTime < bestResult.totalTime)
+				for (std::uint64_t i = 0; i < params.numTemperatureStages; ++i)
 				{
-					bestResult = newResult;
-					bestState = *this;
+					const double t = static_cast<double>(i) / (params.numTemperatureStages - 1);
 
-					report << "New best: " << newResult.averageTime.count() << "s avg.\n";
+					const double temperature =
+						t > params.endTemperatureAfter
+						? params.endTemperature
+						: (params.endTemperatureAfter - t) / params.endTemperatureAfter * params.startTemperature + t * params.endTemperature;
+
+					auto newResult = optimizeSingleBatch(params, prevResult, temperature, rng);
+
+					if (newResult.totalTime < bestResult.totalTime)
+					{
+						bestResult = newResult;
+						bestState = *this;
+
+						report << "New best: " << newResult.averageTime.count() << "s avg.\n";
+					}
+
+					prevResult = newResult;
 				}
 
-				prevResult = newResult;
+				*this = std::move(bestState);
 			}
-
-			*this = std::move(bestState);
 		}
 
 		void print(std::ostream& = std::cout) const
