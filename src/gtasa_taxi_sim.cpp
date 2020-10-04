@@ -49,10 +49,16 @@ namespace gtasa_taxi_sim
 	struct SimulationResult
 	{
 		Seconds totalTime;
+		Seconds averageTime;
+		std::uint64_t numSimulations;
 
 		void operator+=(const SimulationResult& rhs)
 		{
 			totalTime += rhs.totalTime;
+			averageTime = 
+				(averageTime * numSimulations + rhs.averageTime * rhs.numSimulations)
+				/ (numSimulations + rhs.numSimulations);
+			numSimulations += rhs.numSimulations;
 		}
 	};
 
@@ -247,7 +253,7 @@ namespace gtasa_taxi_sim
 		}
 
 		template <typename RngT>
-		[[nodiscard]] SimulationResult simulateFares(LocationId startLocation, int numFares, RngT&& rng)
+		[[nodiscard]] SimulationResult simulateFares(LocationId startLocation, std::uint64_t numFares, RngT&& rng)
 		{
 			SimulationResult result;
 
@@ -269,15 +275,20 @@ namespace gtasa_taxi_sim
 				currentLocation = fare.destination();
 			}
 
+			result.averageTime = result.totalTime;
+			result.numSimulations = 1;
+
 			return result;
 		}
 
 		template <typename RngT>
-		[[nodiscard]] SimulationResult simulateFares(LocationId startLocation, int numFares, std::uint64_t numSimulations, RngT&& rng)
+		[[nodiscard]] SimulationResult simulateFares(LocationId startLocation, std::uint64_t numFares, std::uint64_t numSimulations, RngT&& rng)
 		{
 			SimulationResult result;
 
 			result.totalTime = Seconds{ 0.0 };
+			result.averageTime = Seconds{ 0.0 };
+			result.numSimulations = 0;
 
 			for (std::uint64_t i = 0; i < numSimulations; ++i)
 			{
@@ -306,7 +317,7 @@ namespace gtasa_taxi_sim
 		}
 
 		template <typename RngT>
-		void optimize(int iterations, LocationId startLocation, int numFares, RngT&& rng)
+		void optimize(int iterations, LocationId startLocation, std::uint64_t numFares, RngT&& rng)
 		{
 			constexpr double startTemperature = 1.1;
 			constexpr double endTemperature = 1;
@@ -326,7 +337,7 @@ namespace gtasa_taxi_sim
 		}
 
 		template <typename RngT>
-		void optimize(const OptimizationParameters& params, RngT&& rng)
+		void optimize(const OptimizationParameters& params, std::ostream& report, RngT&& rng)
 		{
 			auto prevResult = simulateFares(0, params.numFaresToComplete, params.numAveragedSimulations, rng);
 			auto bestResult = prevResult;
@@ -347,6 +358,8 @@ namespace gtasa_taxi_sim
 				{
 					bestResult = newResult;
 					bestState = *this;
+
+					report << "New best: " << newResult.averageTime.count() << "s avg.\n";
 				}
 
 				prevResult = newResult;
@@ -434,7 +447,7 @@ namespace gtasa_taxi_sim
 		}
 
 		template <typename RngT>
-		void optimizeSingleIteration(double temperature, LocationId startLocation, int numFares, RngT&& rng)
+		void optimizeSingleIteration(double temperature, LocationId startLocation, std::uint64_t numFares, RngT&& rng)
 		{
 			constexpr int simulationIters = 10;
 
@@ -581,7 +594,7 @@ namespace gtasa_taxi_sim
 			Seconds total{ 0.0 };
 			for (int i = 0; i < 10; ++i)
 			{
-				total += model.simulateFares(startLocation, numFares, rng).totalTime;
+				total += model.simulateFares(startLocation, numFares, rng).averageTime;
 			}
 			std::cout << "Before optimization: " << total.count() << "s\n";
 
@@ -722,21 +735,11 @@ namespace gtasa_taxi_sim
 		model.print(startLocation);
 
 		{
-			Seconds total{ 0.0 };
-			for (int i = 0; i < 10; ++i)
-			{
-				total += model.simulateFares(startLocation, numFares, rng).totalTime;
-			}
-			std::cout << "Before optimization: " << total.count() << "s\n";
+			std::cout << "Before optimization: " << model.simulateFares(startLocation, numFares, 10, rng).averageTime.count() << "s\n";
 
-			model.optimize(config, rng);
+			model.optimize(config, std::cout, rng);
 
-			total = Seconds{ 0.0 };
-			for (int i = 0; i < 10; ++i)
-			{
-				total += model.simulateFares(startLocation, numFares, rng).totalTime;
-			}
-			std::cout << "After optimization: " << total.count() << "s\n";
+			std::cout << "After optimization: " << model.simulateFares(startLocation, numFares, 10, rng).averageTime.count() << "s\n";
 
 			model.print(startLocation);
 		}
