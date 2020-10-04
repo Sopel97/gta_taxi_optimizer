@@ -128,7 +128,9 @@ namespace gtasa_taxi_sim
 			{
 				if (token == "seed"sv)
 				{
-					in >> params.seed;
+					std::uint64_t seed;
+					in >> seed;
+					params.m_seed = seed;
 				}
 				else if (token == "start_temperature"sv)
 				{
@@ -380,9 +382,11 @@ namespace gtasa_taxi_sim
 		// Tries to find a set of fares that minimizes the average
 		// simulation time.
 		// Uses simple simulation annealing.
-		template <typename RngT>
-		void optimize(const OptimizationParameters& params, std::ostream& report, RngT&& rng)
+		template <typename RngT = std::mt19937_64>
+		void optimize(const OptimizationParameters& params, std::ostream& report)
 		{
+			RngT rng(params.getSeed());
+
 			auto prevResult = simulateFares(params.numFaresToComplete, params.numAveragedSimulations, rng);
 			auto bestResult = prevResult;
 			auto bestState = *this;
@@ -721,12 +725,10 @@ namespace gtasa_taxi_sim
 		const fs::path inputModelPath = args[1];
 		const fs::path outputModelPath = args[2];
 
-		std::mt19937_64 rng(1234);
-
 		const auto config = loadOptimizationParameters(configPath);
 		auto model = loadModelFromFile(inputModelPath);
 
-		model.optimize(config, std::cout, rng);
+		model.optimize(config, std::cout);
 
 		std::ofstream outfile(outputModelPath);
 		model.saveToStream(outfile);
