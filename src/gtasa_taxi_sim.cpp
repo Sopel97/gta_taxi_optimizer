@@ -430,6 +430,30 @@ namespace gtasa_taxi_sim
 			return std::vector<LocationId>(reachable.begin(), reachable.end());
 		}
 
+		void saveToStream(std::ostream& out) const
+		{
+			for (LocationId loc = 0; loc < m_avgNextFareSearchTime.size(); ++loc)
+			{
+				out << "loc " << loc << " " << m_avgNextFareSearchTime[loc].count() << '\n';
+			}
+
+			for (LocationId from = 0; from < m_avgNextFareSearchTime.size(); ++from)
+			{
+				FareId fareId = 0;
+				for (; fareId < m_numEnabledFares[from]; ++fareId)
+				{
+					const auto& fare = m_fares[from][fareId];
+					out << "fare " << from << " " << fare.destination() << " " << fare.avgDriveTime().count() << " enabled\n";
+				}
+
+				for (; fareId < m_fares[from].size(); ++fareId)
+				{
+					const auto& fare = m_fares[from][fareId];
+					out << "fare " << from << " " << fare.destination() << " " << fare.avgDriveTime().count() << " disabled\n";
+				}
+			}
+		}
+
 	private:
 		std::vector<Seconds> m_avgNextFareSearchTime;
 		std::vector<std::vector<Fare>> m_fares;
@@ -764,13 +788,13 @@ namespace gtasa_taxi_sim
 		model.optimize(config, std::cout, rng);
 
 		std::ofstream outfile(outputModelPath);
-		model.print(outfile);
+		model.saveToStream(outfile);
 	}
 }
 
 void help()
 {
-	std::cout << "Usage: gtasa_taxi_sim.exe config_path model_path output_path\n";
+	std::cout << "Usage: gtasa_taxi_sim.exe config_path input_model_path output_model_path\n";
 }
 
 int main(int argc, char** argv)
