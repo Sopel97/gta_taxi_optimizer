@@ -374,7 +374,7 @@ namespace gtasa_taxi_sim
 					prevResult = newResult;
 				}
 
-				*this = std::move(bestState);
+				*this = bestState;
 			}
 		}
 
@@ -445,7 +445,7 @@ namespace gtasa_taxi_sim
 				out << "loc " << loc << " " << m_avgNextFareSearchTime[loc].count() << '\n';
 			}
 
-			out << '\n';
+			out << "\n\n";
 
 			for (LocationId from = 0; from < m_avgNextFareSearchTime.size(); ++from)
 			{
@@ -456,13 +456,15 @@ namespace gtasa_taxi_sim
 					out << "fare " << from << " " << fare.destination() << " " << fare.avgDriveTime().count() << " enabled\n";
 				}
 
+				out << "\n";
+
 				for (; fareId < m_fares[from].size(); ++fareId)
 				{
 					const auto& fare = m_fares[from][fareId];
 					out << "fare " << from << " " << fare.destination() << " " << fare.avgDriveTime().count() << " disabled\n";
 				}
 
-				out << '\n';
+				out << "\n\n";
 			}
 		}
 
