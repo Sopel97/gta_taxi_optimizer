@@ -6,12 +6,19 @@
 #include <random>
 #include <cmath>
 #include <queue>
+#include <map>
 #include <set>
+#include <string_view>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 
 #include "Array2.h"
 
 namespace gtasa_taxi_sim
 {
+	namespace fs = std::filesystem;
+
 	using Seconds = std::chrono::duration<double>;
 	using LocationId = std::uint32_t;
 	using FareId = std::uint32_t;
@@ -46,6 +53,93 @@ namespace gtasa_taxi_sim
 
 	struct Model
 	{
+		[[nodiscard]] static Model fromStream(std::istream& in)
+		{
+			struct FareSpec
+			{
+				Fare fare;
+				LocationId from;
+				bool isEnabled;
+			};
+
+			using namespace std::literals;
+
+			std::vector<std::string> locationNames;
+			std::map<std::string, LocationId> locationByName;
+			std::vector<Seconds> avgFareSearchTimes;
+
+			std::vector<FareSpec> fares;
+
+			for (std::string token; in >> token;)
+			{
+				if (token == "loc"sv)
+				{
+					std::string name, avgFareSearchTimeStr;
+					in >> name >> avgFareSearchTimeStr;
+
+					if (locationByName.count(name))
+					{
+						throw std::runtime_error("Duplicated location: " + name);
+					}
+
+					const Seconds avgFareSearchTime = Seconds{ std::atof(avgFareSearchTimeStr.c_str()) };
+
+					locationNames.emplace_back(name);
+					locationByName.try_emplace(name, locationNames.size() - 1);
+					avgFareSearchTimes.emplace_back(avgFareSearchTime);
+				}
+				else if (token == "fare"sv)
+				{
+					std::string enabledStr, avgDriveTimeStr, destinationStr, fromStr;
+					in >> fromStr >> destinationStr >> avgDriveTimeStr >> enabledStr;
+
+					auto destinationIt = locationByName.find(destinationStr);
+					if (destinationIt == locationByName.end())
+					{
+						throw std::runtime_error("Invalid location: " + destinationStr);
+					}
+
+					const LocationId destination = destinationIt->second;
+
+					auto fromIt = locationByName.find(fromStr);
+					if (fromIt == locationByName.end())
+					{
+						throw std::runtime_error("Invalid location: " + fromStr);
+					}
+
+					const LocationId from = fromIt->second;
+
+					const Seconds avgDriveTime = Seconds{ std::atof(avgDriveTimeStr.c_str()) };
+
+					if (enabledStr != "enabled"sv && enabledStr != "disabled"sv)
+					{
+						throw std::runtime_error("Invalid 'enabled' argument for fare: " + enabledStr);
+					}
+
+					const bool isEnabled = destinationStr == "enabled"sv;
+
+					const Fare fare(avgDriveTime, destination);
+
+					fares.emplace_back(FareSpec{ fare, from, isEnabled });
+				}
+				else
+				{
+					throw std::runtime_error("Invalid token: " + token);
+				}
+			}
+
+			auto model = Model(locationNames.size());
+			for (const auto& [fare, from, isEnabled] : fares)
+			{
+				model.addFare(from, fare, isEnabled);
+			}
+
+			for (LocationId i = 0; i < locationNames.size(); ++i)
+			{
+				model.setNextFareSearchTime(i, avgFareSearchTimes[i]);
+			}
+		}
+
 		Model(LocationId numLocations) :
 			m_avgNextFareSearchTime(numLocations, Seconds{0.0}),
 			m_fares(numLocations),
@@ -60,7 +154,7 @@ namespace gtasa_taxi_sim
 			m_avgNextFareSearchTime[location] = time;
 		}
 
-		void addFare(LocationId from, const Fare& fare, bool enabled)
+		void addFare(LocationId from, const Fare& fare, bool enabled = true)
 		{
 			assert(from < numLocations());
 			assert(fare.destination() < numLocations());
@@ -313,6 +407,12 @@ namespace gtasa_taxi_sim
 			}
 		}
 	};
+
+	[[nodiscard]] Model loadModelFromFile(const fs::path& path)
+	{
+		std::ifstream file(path);
+		return Model::fromStream(file);
+	}
 		
 	void testBasic()
 	{
