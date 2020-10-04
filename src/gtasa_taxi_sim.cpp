@@ -23,6 +23,10 @@ namespace gtasa_taxi_sim
 	using LocationId = std::uint32_t;
 	using FareId = std::uint32_t;
 
+	// Fare represents a fare that a game can generate.
+	// It is not attached to an origin.
+	// Whether a fare can be generated from a given origin
+	// can be specified in the model.
 	struct Fare
 	{
 		Fare(Seconds avgDriveTime, LocationId destination) :
@@ -64,13 +68,39 @@ namespace gtasa_taxi_sim
 
 	struct OptimizationParameters
 	{
+		// Seed to use for the PRNG.
 		std::uint64_t seed = 0x0123456789abcdef;
+
+		// Optimizer uses simulated annealing.
+		// Starting temperature of 1.3 means that
+		// it will allow solutions at most 1.3 times worse
+		// than the previous one at the start
 		double startTemperature = 1.3;
+
+		// End temperature for simulated annealing.
+		// Generally should be 1.0 but could be lower.
+		// Shouldn't be higher than 1.0.
 		double endTemperature = 1.0;
+
+		// The % of batch completed to fix the
+		// temperature to the end temperature.
+		// For example a value of 0.5 would mean that
+		// endTemperature is applied from the half of the batch
+		// all the way to the end.
 		double endTemperatureAfter = 0.67;
+
+		// Number of fares to complete in a single simulation.
 		std::uint64_t numFaresToComplete = 50;
+
+		// Number of startTemperature -> endTemperature
+		// cycles to finish.
 		std::uint64_t numBatches = 10;
+
+		// Number of optimization steps (model permutations) 
+		// within a single batch.
 		std::uint64_t numTemperatureStages = 100;
+
+		// Number of simulations to use for model quality estimate.
 		std::uint64_t numAveragedSimulations = 100;
 
 		[[nodiscard]] static OptimizationParameters fromStream(std::istream& in)
@@ -123,6 +153,8 @@ namespace gtasa_taxi_sim
 		}
 	};
 
+	// This class represents the possible fares and also
+	// which fares are rerolled (disabled).
 	struct Model
 	{
 		static constexpr LocationId startLocation = 0;
@@ -216,13 +248,18 @@ namespace gtasa_taxi_sim
 			return model;
 		}
 
+		// Number of locations is fixed from the start
+		// because otherwise we wouldn't know
+		// how much memory to allocate for the state.
 		Model(LocationId numLocations) :
 			m_avgNextFareSearchTime(numLocations, Seconds{0.0}),
-			m_fares(numLocations),
+			m_faresFromLocation(numLocations),
 			m_numEnabledFares(numLocations, 0)
 		{
 		}
 
+		// Set the amount of time it takes on average
+		// to find a new fare at the given location.
 		void setNextFareSearchTime(LocationId location, Seconds time)
 		{
 			assert(location < numLocations());
@@ -235,7 +272,7 @@ namespace gtasa_taxi_sim
 			assert(from < numLocations());
 			assert(fare.destination() < numLocations());
 
-			m_fares[from].emplace_back(fare);
+			m_faresFromLocation[from].emplace_back(fare);
 
 			if (enabled)
 			{
@@ -243,7 +280,7 @@ namespace gtasa_taxi_sim
 			}
 			else
 			{
-				(void)toggleFare(from, static_cast<FareId>(m_fares[from].size() - 1));
+				(void)toggleFare(from, static_cast<FareId>(m_faresFromLocation[from].size() - 1));
 			}
 
 			m_isFareLocationDistributionUpToDate = false;
@@ -310,7 +347,7 @@ namespace gtasa_taxi_sim
 		template <typename RngT>
 		[[nodiscard]] std::pair<const Fare&, bool> chooseRandomFare(LocationId from, RngT&& rng)
 		{
-			const auto& fares = m_fares[from];
+			const auto& fares = m_faresFromLocation[from];
 
 			if (fares.empty())
 			{
@@ -345,6 +382,9 @@ namespace gtasa_taxi_sim
 			}
 		}
 
+		// Tries to find a set of fares that minimizes the average
+		// simulation time.
+		// Uses simple simulation annealing.
 		template <typename RngT>
 		void optimize(const OptimizationParameters& params, std::ostream& report, RngT&& rng)
 		{
@@ -386,7 +426,7 @@ namespace gtasa_taxi_sim
 			{
 				std::cout << "L" << from << ": ";
 
-				const auto& possibleFares = m_fares[from];
+				const auto& possibleFares = m_faresFromLocation[from];
 				const auto numAllowedFares = m_numEnabledFares[from];
 
 				for (FareId fare = 0; fare < numAllowedFares; ++fare)
@@ -427,7 +467,7 @@ namespace gtasa_taxi_sim
 
 				for (FareId i = 0; i < m_numEnabledFares[current]; ++i)
 				{
-					const auto& fare = m_fares[current][i];
+					const auto& fare = m_faresFromLocation[current][i];
 					const auto dest = fare.destination();
 
 					if (reachable.count(dest) == 0)
@@ -454,15 +494,15 @@ namespace gtasa_taxi_sim
 				FareId fareId = 0;
 				for (; fareId < m_numEnabledFares[from]; ++fareId)
 				{
-					const auto& fare = m_fares[from][fareId];
+					const auto& fare = m_faresFromLocation[from][fareId];
 					out << "fare " << from << " " << fare.destination() << " " << fare.avgDriveTime().count() << " enabled\n";
 				}
 
 				out << "\n";
 
-				for (; fareId < m_fares[from].size(); ++fareId)
+				for (; fareId < m_faresFromLocation[from].size(); ++fareId)
 				{
-					const auto& fare = m_fares[from][fareId];
+					const auto& fare = m_faresFromLocation[from][fareId];
 					out << "fare " << from << " " << fare.destination() << " " << fare.avgDriveTime().count() << " disabled\n";
 				}
 
@@ -471,15 +511,28 @@ namespace gtasa_taxi_sim
 		}
 
 	private:
+		// For each location we store how much time on average
+		// is needed to find a new fare.
 		std::vector<Seconds> m_avgNextFareSearchTime;
-		std::vector<std::vector<Fare>> m_fares;
+
+		// For each location we store the fares that can be generated.
+		std::vector<std::vector<Fare>> m_faresFromLocation;
+
+		// First m_numEnabledFares[loc] fares in m_faresFromLocation[loc] are
+		// enabled, the rest is disabled (will be rerolled).
 		std::vector<FareId> m_numEnabledFares;
 
+		// Used by the optimizer to choose a random fare with
+		// equal probability for each.
 		std::discrete_distribution<LocationId> m_fareLocationDistribution;
 		bool m_isFareLocationDistributionUpToDate = false;
 
 		template <typename RngT>
-		[[nodiscard]] SimulationResult optimizeSingleBatch(const OptimizationParameters& params, const SimulationResult& prevResult, double temperature, RngT&& rng)
+		[[nodiscard]] SimulationResult optimizeSingleBatch(
+			const OptimizationParameters& params, 
+			const SimulationResult& prevResult, 
+			double temperature, 
+			RngT&& rng)
 		{
 			auto [location, fare] = toggleRandomFare(rng);
 
@@ -521,7 +574,7 @@ namespace gtasa_taxi_sim
 		// This operation is reversible with the same parameters.
 		[[nodiscard]] FareId toggleFare(LocationId from, FareId fareId)
 		{
-			auto& fares = m_fares[from];
+			auto& fares = m_faresFromLocation[from];
 
 			if (fareId < m_numEnabledFares[from])
 			{
@@ -544,7 +597,7 @@ namespace gtasa_taxi_sim
 		template <typename RngT>
 		[[nodiscard]] FareId toggleRandomFare(LocationId from, RngT&& rng)
 		{
-			const auto& fares = m_fares[from];
+			const auto& fares = m_faresFromLocation[from];
 
 			if (fares.size() <= 1)
 			{
@@ -568,7 +621,7 @@ namespace gtasa_taxi_sim
 		{
 			std::vector<FareId> counts;
 			counts.reserve(m_avgNextFareSearchTime.size());
-			for (const auto& fares : m_fares)
+			for (const auto& fares : m_faresFromLocation)
 			{
 				// We need to find a location where we can even toggle a fare.
 				if (fares.size() <= 1)
