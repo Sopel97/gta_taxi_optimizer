@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 
 #include "Array2.h"
 
@@ -68,8 +69,22 @@ namespace gtasa_taxi_sim
 
 	struct OptimizationParameters
 	{
+	private:
 		// Seed to use for the PRNG.
-		std::uint64_t seed = 0x0123456789abcdef;
+		std::optional<std::uint64_t> m_seed = std::nullopt;
+
+	public:
+		[[nodiscard]] std::uint64_t getSeed() const
+		{
+			if (m_seed.has_value())
+			{
+				return *m_seed;
+			}
+			else
+			{
+				return std::chrono::high_resolution_clock::now().time_since_epoch().count();
+			}
+		}
 
 		// Optimizer uses simulated annealing.
 		// Starting temperature of 1.3 means that
