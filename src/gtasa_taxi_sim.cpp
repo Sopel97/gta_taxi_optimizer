@@ -4,6 +4,7 @@
 #include <vector>
 #include <cassert>
 #include <random>
+#include <cmath>
 
 #include "Array2.h"
 
@@ -125,9 +126,9 @@ namespace gtasa_taxi_sim
 		template <typename RngT>
 		void optimize(int iterations, LocationId startLocation, int numFares, RngT&& rng)
 		{
-			constexpr double startTemperature = 1.5;
+			constexpr double startTemperature = 1.1;
 			constexpr double endTemperature = 1;
-			constexpr double endTemperatureAtT = 0.8;
+			constexpr double endTemperatureAtT = 0.5;
 
 			for (int i = 0; i < iterations; ++i)
 			{
@@ -267,58 +268,167 @@ namespace gtasa_taxi_sim
 			}
 		}
 	};
+		
+	void testBasic()
+	{
+		constexpr LocationId numLocations = 3;
+		constexpr int numFares = 50;
+		constexpr int optimizationIters = 10;
+		constexpr int optimizationTries = 10;
+
+		std::mt19937_64 rng(1234);
+
+		auto model = TaxiMission(numLocations);
+
+		for (LocationId i = 0; i < numLocations; ++i)
+		{
+			model.setNextFareSearchTime(i, Seconds{ 0.2 });
+
+			for (LocationId j = 0; j < numLocations; ++j)
+			{
+				if (i == j)
+				{
+					continue;
+				}
+
+				model.addPossibleFare(i, Fare(Seconds{ (i + j) * 0.54 }, j));
+			}
+		}
+
+		{
+			LocationId startLocation = 0;
+
+			Seconds total{ 0.0 };
+			for (int i = 0; i < 10; ++i)
+			{
+				total += model.simulateFares(startLocation, numFares, rng).totalTime;
+			}
+			std::cout << "Before optimization: " << total.count() << "s\n";
+
+			for (int i = 0; i < optimizationTries; ++i)
+			{
+				model.optimize(optimizationIters, startLocation, numFares, rng);
+
+				total = Seconds{ 0.0 };
+				for (int i = 0; i < 10; ++i)
+				{
+					total += model.simulateFares(startLocation, numFares, rng).totalTime;
+				}
+				std::cout << "After optimization try " << i << ": " << total.count() << "s\n";
+			}
+
+			model.print();
+		}
+	}
+
+	struct Point
+	{
+		double x, y;
+	};
+
+	[[nodiscard]] double distance(const Point& lhs, const Point& rhs)
+	{
+		const double dx = lhs.x - rhs.x;
+		const double dy = lhs.y - rhs.y;
+		return std::sqrt(dx * dx + dy * dy);
+	}
+
+	template <typename RngT>
+	TaxiMission generateRandomModel(
+		LocationId numLocations, 
+		RngT&& rng)
+	{
+		constexpr double minX = 0.0;
+		constexpr double minY = 0.0;
+		constexpr double maxX = 800.0;
+		constexpr double maxY = 600.0;
+		constexpr double minFareSearchTime = 4.0;
+		constexpr double maxFareSearchTime = 10.0;
+		constexpr double minDistanceMultiplier = 0.8;
+		constexpr double maxDistanceMultiplier = 1.2;
+		constexpr double drivingSpeed = 40.0;
+
+		auto randomPoint = [&]()
+		{
+			std::uniform_real_distribution<double> dx(minX, maxX);
+			std::uniform_real_distribution<double> dy(minY, maxY);
+			return Point{ dx(rng), dy(rng) };
+		};
+
+		auto model = TaxiMission(numLocations);
+
+		std::vector<Point> locationPoints;
+		for (LocationId i = 0; i < numLocations; ++i)
+		{
+			locationPoints.emplace_back(randomPoint());
+		}
+
+		for (LocationId from = 0; from < numLocations; ++from)
+		{
+			model.setNextFareSearchTime(from, Seconds{ std::uniform_real_distribution<double>(minFareSearchTime, maxFareSearchTime)(rng) });
+
+			for (LocationId to = 0; to < numLocations; ++to)
+			{
+				if (from == to)
+				{
+					continue;
+				}
+
+				const double dm = std::uniform_real_distribution<double>(minDistanceMultiplier, maxDistanceMultiplier)(rng);
+				const double rawDistance = distance(locationPoints[from], locationPoints[to]);
+				const double distance = rawDistance * dm;
+				const Seconds fareTime = Seconds{ distance / drivingSpeed };
+
+				model.addPossibleFare(from, Fare{ fareTime, to });
+			}
+		}
+
+		return model;
+	}
+
+	void testRandomModel()
+	{
+		constexpr LocationId numLocations = 20;
+		constexpr int numFares = 50;
+		constexpr int optimizationIters = 100;
+		constexpr int optimizationTries = 100;
+
+		std::mt19937_64 rng(1234);
+
+		auto model = generateRandomModel(numLocations, rng);
+
+		model.print();
+
+		{
+			LocationId startLocation = 0;
+
+			Seconds total{ 0.0 };
+			for (int i = 0; i < 10; ++i)
+			{
+				total += model.simulateFares(startLocation, numFares, rng).totalTime;
+			}
+			std::cout << "Before optimization: " << total.count() << "s\n";
+
+			for (int i = 0; i < optimizationTries; ++i)
+			{
+				model.optimize(optimizationIters, startLocation, numFares, rng);
+
+				total = Seconds{ 0.0 };
+				for (int i = 0; i < 10; ++i)
+				{
+					total += model.simulateFares(startLocation, numFares, rng).totalTime;
+				}
+				std::cout << "After optimization try " << i << ": " << total.count() << "s\n";
+			}
+
+			model.print();
+		}
+	}
 }
 
 int main()
 {
-	using namespace gtasa_taxi_sim;
-
-	constexpr LocationId numLocations = 3;
-	constexpr int numFares = 50;
-	constexpr int optimizationIters = 10;
-	constexpr int optimizationTries = 10;
-
-	std::mt19937_64 rng(1234);
-
-	auto model = TaxiMission(numLocations);
-
-	for (LocationId i = 0; i < numLocations; ++i)
-	{
-		model.setNextFareSearchTime(i, Seconds{ 0.2 });
-
-		for (LocationId j = 0; j < numLocations; ++j)
-		{
-			if (i == j)
-			{
-				continue;
-			}
-
-			model.addPossibleFare(i, Fare(Seconds{ (i+j) * 0.54 }, j));
-		}
-	}
-
-	LocationId startLocation = 0;
-
-	Seconds total{ 0.0 };
-	for (int i = 0; i < 10; ++i)
-	{
-		total += model.simulateFares(startLocation, numFares, rng).totalTime;
-	}
-	std::cout << "Before optimization: " << total.count() << "s\n";
-
-	for (int i = 0; i < optimizationTries; ++i)
-	{
-		model.optimize(optimizationIters, startLocation, numFares, rng);
-
-		total = Seconds{ 0.0 };
-		for (int i = 0; i < 10; ++i)
-		{
-			total += model.simulateFares(startLocation, numFares, rng).totalTime;
-		}
-		std::cout << "After optimization try " << i << ": " << total.count() << "s\n";
-	}
-
-	model.print();
+	gtasa_taxi_sim::testRandomModel();
 
 	return 0;
 }
