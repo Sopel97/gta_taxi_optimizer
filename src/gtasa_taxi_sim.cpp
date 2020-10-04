@@ -51,6 +51,67 @@ namespace gtasa_taxi_sim
 		Seconds totalTime;
 	};
 
+	struct OptimizationParameters
+	{
+		std::uint64_t seed = 0x0123456789abcdef;
+		double startTemperature = 1.3;
+		double endTemperature = 1.0;
+		double endTemperatureAfter = 0.67;
+		std::uint64_t numFaresToComplete = 50;
+		std::uint64_t numBatches = 100;
+		std::uint64_t numIterationsPerBatch = 100;
+		std::uint64_t numAveragedSimulations = 100;
+
+		[[nodiscard]] static OptimizationParameters fromStream(std::istream& in)
+		{
+			using namespace std::literals;
+
+			OptimizationParameters params{};
+
+			for (std::string token; in >> token;)
+			{
+				if (token == "seed"sv)
+				{
+					in >> params.seed;
+				}
+				else if (token == "start_temperature"sv)
+				{
+					in >> params.startTemperature;
+				}
+				else if (token == "end_temperature"sv)
+				{
+					in >> params.endTemperature;
+				}
+				else if (token == "end_temperature_after"sv)
+				{
+					in >> params.endTemperatureAfter;
+				}
+				else if (token == "num_fares_to_complete"sv)
+				{
+					in >> params.numFaresToComplete;
+				}
+				else if (token == "num_batches"sv)
+				{
+					in >> params.numBatches;
+				}
+				else if (token == "num_iterations_per_batch"sv)
+				{
+					in >> params.numIterationsPerBatch;
+				}
+				else if (token == "num_averaged_simulations"sv)
+				{
+					in >> params.numAveragedSimulations;
+				}
+				else
+				{
+					throw std::runtime_error("Invalid parameter: " + token);
+				}
+			}
+
+			return params;
+		}
+	};
+
 	struct Model
 	{
 		[[nodiscard]] static Model fromStream(std::istream& in)
@@ -420,6 +481,16 @@ namespace gtasa_taxi_sim
 		return Model::fromStream(file);
 	}
 
+	[[nodiscard]] OptimizationParameters loadOptimizationParameters(const fs::path& path)
+	{
+		std::ifstream file(path);
+		if (!file.is_open())
+		{
+			throw std::runtime_error("File not found: " + path.string());
+		}
+		return OptimizationParameters::fromStream(file);
+	}
+
 	void testBasic()
 	{
 		constexpr LocationId numLocations = 3;
@@ -577,7 +648,8 @@ namespace gtasa_taxi_sim
 
 	void testFileModel()
 	{
-		const fs::path filename = "../../../examples/model.model";
+		const fs::path modelFilename = "../../../examples/model.model";
+		const fs::path configFilename = "../../../examples/optimization.cfg";
 
 		constexpr LocationId startLocation = 0;
 		constexpr int numFares = 50;
@@ -586,7 +658,8 @@ namespace gtasa_taxi_sim
 
 		std::mt19937_64 rng(1234);
 
-		auto model = loadModelFromFile(filename);
+		auto model = loadModelFromFile(modelFilename);
+		auto config = loadOptimizationParameters(configFilename);
 
 		model.print(startLocation);
 
