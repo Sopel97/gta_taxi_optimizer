@@ -60,13 +60,21 @@ namespace gtasa_taxi_sim
 			m_avgNextFareSearchTime[location] = time;
 		}
 
-		void addPossibleFare(LocationId from, const Fare& fare)
+		void addPossibleFare(LocationId from, const Fare& fare, bool enabled)
 		{
 			assert(from < numLocations());
 			assert(fare.destination() < numLocations());
 
 			m_possibleFares[from].emplace_back(fare);
-			m_numAllowedFares[from] += 1;
+
+			if (enabled)
+			{
+				m_numAllowedFares[from] += 1;
+			}
+			else
+			{
+				toggleFare(from, m_possibleFares[from].size() - 1);
+			}
 		}
 
 		[[nodiscard]] Seconds avgNextFareSearchTime(LocationId location) const
