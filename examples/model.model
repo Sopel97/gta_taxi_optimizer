@@ -1,0 +1,20 @@
+loc A 0.2
+loc B 0.3
+loc C 0.1
+loc D_name_can_be_longer 0.4
+
+fare A B 10.1 enabled
+fare A C 14.1 enabled
+fare A D_name_can_be_longer 17.1 enabled
+
+fare B A 10.1 enabled
+fare B C 22.1 enabled
+fare B D_name_can_be_longer 6.1 enabled
+
+fare C A 14.1 enabled
+fare C B 22.1 enabled
+fare C D_name_can_be_longer 9.1 enabled
+
+fare D_name_can_be_longer A 17.1 enabled
+fare D_name_can_be_longer B 6.1 enabled
+fare D_name_can_be_longer C 9.1 enabled

@@ -85,7 +85,7 @@ namespace gtasa_taxi_sim
 					const Seconds avgFareSearchTime = Seconds{ std::atof(avgFareSearchTimeStr.c_str()) };
 
 					locationNames.emplace_back(name);
-					locationByName.try_emplace(name, locationNames.size() - 1);
+					locationByName.try_emplace(name, static_cast<LocationId>(locationNames.size() - 1));
 					avgFareSearchTimes.emplace_back(avgFareSearchTime);
 				}
 				else if (token == "fare"sv)
@@ -128,7 +128,7 @@ namespace gtasa_taxi_sim
 				}
 			}
 
-			auto model = Model(locationNames.size());
+			auto model = Model(static_cast<LocationId>(locationNames.size()));
 			for (const auto& [fare, from, isEnabled] : fares)
 			{
 				model.addFare(from, fare, isEnabled);
@@ -138,6 +138,8 @@ namespace gtasa_taxi_sim
 			{
 				model.setNextFareSearchTime(i, avgFareSearchTimes[i]);
 			}
+
+			return model;
 		}
 
 		Model(LocationId numLocations) :
@@ -167,7 +169,7 @@ namespace gtasa_taxi_sim
 			}
 			else
 			{
-				toggleFare(from, m_fares[from].size() - 1);
+				(void)toggleFare(from, static_cast<FareId>(m_fares[from].size() - 1));
 			}
 		}
 
@@ -411,9 +413,13 @@ namespace gtasa_taxi_sim
 	[[nodiscard]] Model loadModelFromFile(const fs::path& path)
 	{
 		std::ifstream file(path);
+		if (!file.is_open())
+		{
+			throw std::runtime_error("File not found: " + path.string());
+		}
 		return Model::fromStream(file);
 	}
-		
+
 	void testBasic()
 	{
 		constexpr LocationId numLocations = 3;
@@ -568,11 +574,50 @@ namespace gtasa_taxi_sim
 			model.print(startLocation);
 		}
 	}
+
+	void testFileModel()
+	{
+		const fs::path filename = "../../../examples/model.model";
+
+		constexpr LocationId startLocation = 0;
+		constexpr int numFares = 50;
+		constexpr int optimizationIters = 100;
+		constexpr int optimizationTries = 100;
+
+		std::mt19937_64 rng(1234);
+
+		auto model = loadModelFromFile(filename);
+
+		model.print(startLocation);
+
+		{
+			Seconds total{ 0.0 };
+			for (int i = 0; i < 10; ++i)
+			{
+				total += model.simulateFares(startLocation, numFares, rng).totalTime;
+			}
+			std::cout << "Before optimization: " << total.count() << "s\n";
+
+			for (int i = 0; i < optimizationTries; ++i)
+			{
+				model.optimize(optimizationIters, startLocation, numFares, rng);
+
+				total = Seconds{ 0.0 };
+				for (int i = 0; i < 10; ++i)
+				{
+					total += model.simulateFares(startLocation, numFares, rng).totalTime;
+				}
+				std::cout << "After optimization try " << i << ": " << total.count() << "s\n";
+			}
+
+			model.print(startLocation);
+		}
+	}
 }
 
 int main()
 {
-	gtasa_taxi_sim::testRandomModel();
+	gtasa_taxi_sim::testFileModel();
 
 	return 0;
 }
