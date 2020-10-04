@@ -368,7 +368,7 @@ namespace gtasa_taxi_sim
 			*this = std::move(bestState);
 		}
 
-		void print(LocationId start) const
+		void print(LocationId start, std::ostream& = std::cout) const
 		{
 			for (LocationId from = 0; from < numLocations(); ++from)
 			{
@@ -746,11 +746,51 @@ namespace gtasa_taxi_sim
 			model.print(startLocation);
 		}
 	}
+
+	void process(const std::vector<std::string>& args)
+	{
+		if (args.size() < 3)
+		{
+			throw std::runtime_error("Invalid arguments to process.");
+		}
+
+		const fs::path configPath = args[0];
+		const fs::path inputModelPath = args[1];
+		const fs::path outputModelPath = args[2];
+
+		std::mt19937_64 rng(1234);
+
+		const auto config = loadOptimizationParameters(configPath);
+		auto model = loadModelFromFile(inputModelPath);
+
+		model.optimize(config, std::cout, rng);
+
+		std::ofstream outfile(outputModelPath);
+		model.print(0, outfile);
+	}
 }
 
-int main()
+void help()
 {
-	gtasa_taxi_sim::testFileModel();
+	std::cout << "Usage: gtasa_taxi_sim.exe config_path model_path output_path\n";
+}
+
+int main(int argc, char** argv)
+{
+	if (argc < 4)
+	{
+		help();
+		return 0;
+	}
+
+	try
+	{
+		gtasa_taxi_sim::process(std::vector<std::string>(argv + 1, argv + argc));
+	}
+	catch (std::runtime_error& e)
+	{
+		std::cout << e.what();
+	}
 
 	return 0;
 }
