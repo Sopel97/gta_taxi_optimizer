@@ -39,17 +39,17 @@ namespace gtasa_taxi_sim
 		LocationId m_destination;
 	};
 
-	struct TaxiMissionSimulationResult
+	struct SimulationResult
 	{
 		Seconds totalTime;
 	};
 
-	struct TaxiMission
+	struct Model
 	{
-		TaxiMission(LocationId numLocations) :
+		Model(LocationId numLocations) :
 			m_avgNextFareSearchTime(numLocations, Seconds{0.0}),
-			m_possibleFares(numLocations),
-			m_numAllowedFares(numLocations, 0)
+			m_fares(numLocations),
+			m_numEnabledFares(numLocations, 0)
 		{
 		}
 
@@ -60,20 +60,20 @@ namespace gtasa_taxi_sim
 			m_avgNextFareSearchTime[location] = time;
 		}
 
-		void addPossibleFare(LocationId from, const Fare& fare, bool enabled)
+		void addFare(LocationId from, const Fare& fare, bool enabled)
 		{
 			assert(from < numLocations());
 			assert(fare.destination() < numLocations());
 
-			m_possibleFares[from].emplace_back(fare);
+			m_fares[from].emplace_back(fare);
 
 			if (enabled)
 			{
-				m_numAllowedFares[from] += 1;
+				m_numEnabledFares[from] += 1;
 			}
 			else
 			{
-				toggleFare(from, m_possibleFares[from].size() - 1);
+				toggleFare(from, m_fares[from].size() - 1);
 			}
 		}
 
@@ -90,9 +90,9 @@ namespace gtasa_taxi_sim
 		}
 
 		template <typename RngT>
-		[[nodiscard]] TaxiMissionSimulationResult simulateFares(LocationId startLocation, int numFares, RngT&& rng)
+		[[nodiscard]] SimulationResult simulateFares(LocationId startLocation, int numFares, RngT&& rng)
 		{
-			TaxiMissionSimulationResult result;
+			SimulationResult result;
 
 			result.totalTime = Seconds{ 0.0 };
 
@@ -118,19 +118,19 @@ namespace gtasa_taxi_sim
 		template <typename RngT>
 		[[nodiscard]] std::pair<const Fare&, bool> chooseRandomFare(LocationId from, RngT&& rng)
 		{
-			const auto& possibleFares = m_possibleFares[from];
+			const auto& fares = m_fares[from];
 
-			if (possibleFares.empty())
+			if (fares.empty())
 			{
 				throw std::runtime_error("No fare from location " + std::to_string(from));
 			}
 
 			const auto fareId = std::uniform_int_distribution<FareId>(
 				0, 
-				static_cast<FareId>(possibleFares.size()) - 1
+				static_cast<FareId>(fares.size()) - 1
 				)(rng);
 
-			return { possibleFares[fareId], fareId < m_numAllowedFares[from] };
+			return { fares[fareId], fareId < m_numEnabledFares[from] };
 		}
 
 		template <typename RngT>
@@ -159,8 +159,8 @@ namespace gtasa_taxi_sim
 			{
 				std::cout << "L" << from << ": ";
 
-				const auto& possibleFares = m_possibleFares[from];
-				const auto numAllowedFares = m_numAllowedFares[from];
+				const auto& possibleFares = m_fares[from];
+				const auto numAllowedFares = m_numEnabledFares[from];
 
 				for (FareId fare = 0; fare < numAllowedFares; ++fare)
 				{
@@ -198,9 +198,9 @@ namespace gtasa_taxi_sim
 
 				reachable.emplace(current);
 
-				for (FareId i = 0; i < m_numAllowedFares[current]; ++i)
+				for (FareId i = 0; i < m_numEnabledFares[current]; ++i)
 				{
-					const auto& fare = m_possibleFares[current][i];
+					const auto& fare = m_fares[current][i];
 					const auto dest = fare.destination();
 
 					if (reachable.count(dest) == 0)
@@ -215,8 +215,8 @@ namespace gtasa_taxi_sim
 
 	private:
 		std::vector<Seconds> m_avgNextFareSearchTime;
-		std::vector<std::vector<Fare>> m_possibleFares;
-		std::vector<FareId> m_numAllowedFares;
+		std::vector<std::vector<Fare>> m_fares;
+		std::vector<FareId> m_numEnabledFares;
 
 		template <typename RngT>
 		void optimizeSingleIteration(double temperature, LocationId startLocation, int numFares, RngT&& rng)
@@ -246,22 +246,22 @@ namespace gtasa_taxi_sim
 		// This operation is reversible with the same parameters.
 		[[nodiscard]] FareId toggleFare(LocationId from, FareId fareId)
 		{
-			auto& possibleFares = m_possibleFares[from];
+			auto& fares = m_fares[from];
 
-			if (fareId < m_numAllowedFares[from])
+			if (fareId < m_numEnabledFares[from])
 			{
 				// we have to disallow this fare
-				const auto newFareId = m_numAllowedFares[from] - 1;
-				std::swap(possibleFares[fareId], possibleFares[newFareId]);
-				m_numAllowedFares[from] -= 1;
+				const auto newFareId = m_numEnabledFares[from] - 1;
+				std::swap(fares[fareId], fares[newFareId]);
+				m_numEnabledFares[from] -= 1;
 				return newFareId;
 			}
 			else
 			{
 				// we have to allow this fare
-				const auto newFareId = m_numAllowedFares[from];
-				std::swap(possibleFares[fareId], possibleFares[newFareId]);
-				m_numAllowedFares[from] += 1;
+				const auto newFareId = m_numEnabledFares[from];
+				std::swap(fares[fareId], fares[newFareId]);
+				m_numEnabledFares[from] += 1;
 				return newFareId;
 			}
 		}
@@ -269,9 +269,9 @@ namespace gtasa_taxi_sim
 		template <typename RngT>
 		[[nodiscard]] FareId toggleRandomFare(LocationId from, RngT&& rng)
 		{
-			const auto& possibleFares = m_possibleFares[from];
+			const auto& fares = m_fares[from];
 
-			if (possibleFares.size() <= 1)
+			if (fares.size() <= 1)
 			{
 				throw std::runtime_error("Cannot toggle any fare if there is only 1 available.");
 			}
@@ -281,8 +281,8 @@ namespace gtasa_taxi_sim
 				const auto fareId = std::uniform_int_distribution<FareId>(
 					// If there is only one allowed fare then we cannot
 					// toggle it. Choose one to enable instead.
-					m_numAllowedFares[from] <= 1 ? 1 : 0,
-					static_cast<FareId>(possibleFares.size()) - 1
+					m_numEnabledFares[from] <= 1 ? 1 : 0,
+					static_cast<FareId>(fares.size()) - 1
 					)(rng);
 
 				return toggleFare(from, fareId);
@@ -302,7 +302,7 @@ namespace gtasa_taxi_sim
 					)(rng);
 
 				// We need to find a location where we can even toggle a fare.
-				if (m_possibleFares[locationId].size() <= 1)
+				if (m_fares[locationId].size() <= 1)
 				{
 					continue;
 				}
@@ -323,7 +323,7 @@ namespace gtasa_taxi_sim
 
 		std::mt19937_64 rng(1234);
 
-		auto model = TaxiMission(numLocations);
+		auto model = Model(numLocations);
 
 		for (LocationId i = 0; i < numLocations; ++i)
 		{
@@ -336,7 +336,7 @@ namespace gtasa_taxi_sim
 					continue;
 				}
 
-				model.addPossibleFare(i, Fare(Seconds{ (i + j) * 0.54 }, j));
+				model.addFare(i, Fare(Seconds{ (i + j) * 0.54 }, j));
 			}
 		}
 
@@ -379,7 +379,7 @@ namespace gtasa_taxi_sim
 	}
 
 	template <typename RngT>
-	TaxiMission generateRandomModel(
+	Model generateRandomModel(
 		LocationId numLocations, 
 		RngT&& rng)
 	{
@@ -400,7 +400,7 @@ namespace gtasa_taxi_sim
 			return Point{ dx(rng), dy(rng) };
 		};
 
-		auto model = TaxiMission(numLocations);
+		auto model = Model(numLocations);
 
 		std::vector<Point> locationPoints;
 		for (LocationId i = 0; i < numLocations; ++i)
@@ -424,7 +424,7 @@ namespace gtasa_taxi_sim
 				const double distance = rawDistance * dm;
 				const Seconds fareTime = Seconds{ distance / drivingSpeed };
 
-				model.addPossibleFare(from, Fare{ fareTime, to });
+				model.addFare(from, Fare{ fareTime, to });
 			}
 		}
 
