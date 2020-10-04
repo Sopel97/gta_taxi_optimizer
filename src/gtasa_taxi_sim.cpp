@@ -738,7 +738,7 @@ namespace gtasa_taxi_sim
 void help()
 {
 	std::cout << "Usage: gtasa_taxi_sim.exe config_path input_model_path output_model_path\n";
-	std::cout << "Example: gtasa_taxi_sim.exe examples/optimization.cfg random.model out.model\n";
+	std::cout << "Example: gtasa_taxi_sim.exe examples/optimization.cfg examples/random.model examples/out.model\n";
 }
 
 int main(int argc, char** argv)
