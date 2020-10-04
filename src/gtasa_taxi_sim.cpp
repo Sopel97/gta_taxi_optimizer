@@ -5,6 +5,8 @@
 #include <cassert>
 #include <random>
 #include <cmath>
+#include <queue>
+#include <set>
 
 #include "Array2.h"
 
@@ -143,7 +145,7 @@ namespace gtasa_taxi_sim
 			}
 		}
 
-		void print()
+		void print(LocationId start) const
 		{
 			for (LocationId from = 0; from < numLocations(); ++from)
 			{
@@ -166,6 +168,41 @@ namespace gtasa_taxi_sim
 
 				std::cout << '\n';
 			}
+
+			std::cout << "\nReachable: ";
+			for (auto loc : reachableLocations(start))
+			{
+				std::cout << loc << ' ';
+			}
+			std::cout << '\n';
+		}
+
+		[[nodiscard]] std::vector<LocationId> reachableLocations(LocationId start) const
+		{
+			std::set<LocationId> reachable;
+			std::queue<LocationId> reachableQueue;
+			reachableQueue.emplace(start);
+			
+			while (!reachableQueue.empty())
+			{
+				const LocationId current = reachableQueue.front();
+				reachableQueue.pop();
+
+				reachable.emplace(current);
+
+				for (FareId i = 0; i < m_numAllowedFares[current]; ++i)
+				{
+					const auto& fare = m_possibleFares[current][i];
+					const auto dest = fare.destination();
+
+					if (reachable.count(dest) == 0)
+					{
+						reachableQueue.emplace(dest);
+					}
+				}
+			}
+
+			return std::vector<LocationId>(reachable.begin(), reachable.end());
 		}
 
 	private:
@@ -317,7 +354,7 @@ namespace gtasa_taxi_sim
 				std::cout << "After optimization try " << i << ": " << total.count() << "s\n";
 			}
 
-			model.print();
+			model.print(startLocation);
 		}
 	}
 
@@ -389,6 +426,7 @@ namespace gtasa_taxi_sim
 	void testRandomModel()
 	{
 		constexpr LocationId numLocations = 20;
+		constexpr LocationId startLocation = 0;
 		constexpr int numFares = 50;
 		constexpr int optimizationIters = 100;
 		constexpr int optimizationTries = 100;
@@ -397,11 +435,9 @@ namespace gtasa_taxi_sim
 
 		auto model = generateRandomModel(numLocations, rng);
 
-		model.print();
+		model.print(startLocation);
 
 		{
-			LocationId startLocation = 0;
-
 			Seconds total{ 0.0 };
 			for (int i = 0; i < 10; ++i)
 			{
@@ -421,7 +457,7 @@ namespace gtasa_taxi_sim
 				std::cout << "After optimization try " << i << ": " << total.count() << "s\n";
 			}
 
-			model.print();
+			model.print(startLocation);
 		}
 	}
 }
