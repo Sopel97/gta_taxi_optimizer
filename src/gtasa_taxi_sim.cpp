@@ -362,26 +362,6 @@ namespace gtasa_taxi_sim
 			return { fares[fareId], fareId < m_numEnabledFares[from] };
 		}
 
-		template <typename RngT>
-		void optimize(int iterations, std::uint64_t numFares, RngT&& rng)
-		{
-			constexpr double startTemperature = 1.1;
-			constexpr double endTemperature = 1;
-			constexpr double endTemperatureAtT = 0.5;
-
-			for (int i = 0; i < iterations; ++i)
-			{
-				const double t = static_cast<double>(i) / (iterations - 1);
-
-				const double temperature =
-					t > endTemperatureAtT
-					? endTemperature
-					: (endTemperatureAtT - t) / endTemperatureAtT * startTemperature + t * endTemperature;
-
-				optimizeSingleIteration(temperature, numFares, rng);
-			}
-		}
-
 		// Tries to find a set of fares that minimizes the average
 		// simulation time.
 		// Uses simple simulation annealing.
@@ -546,31 +526,6 @@ namespace gtasa_taxi_sim
 			return newResult;
 		}
 
-		template <typename RngT>
-		void optimizeSingleIteration(double temperature, std::uint64_t numFares, RngT&& rng)
-		{
-			constexpr int simulationIters = 10;
-
-			Seconds totalTimeBefore{ 0.0 };
-			for (int i = 0; i < simulationIters; ++i)
-			{
-				totalTimeBefore += simulateFares(numFares, rng).totalTime;
-			}
-
-			auto [location, fare] = toggleRandomFare(rng);
-
-			Seconds totalTimeAfter{ 0.0 };
-			for (int i = 0; i < simulationIters; ++i)
-			{
-				totalTimeAfter += simulateFares(numFares, rng).totalTime;
-			}
-
-			if (totalTimeAfter > totalTimeBefore * temperature)
-			{
-				(void)toggleFare(location, fare);
-			}
-		}
-
 		// This operation is reversible with the same parameters.
 		[[nodiscard]] FareId toggleFare(LocationId from, FareId fareId)
 		{
@@ -675,56 +630,6 @@ namespace gtasa_taxi_sim
 		return OptimizationParameters::fromStream(file);
 	}
 
-	void testBasic()
-	{
-		constexpr LocationId numLocations = 3;
-		constexpr int numFares = 50;
-		constexpr int optimizationIters = 10;
-		constexpr int optimizationTries = 10;
-
-		std::mt19937_64 rng(1234);
-
-		auto model = Model(numLocations);
-
-		for (LocationId i = 0; i < numLocations; ++i)
-		{
-			model.setNextFareSearchTime(i, Seconds{ 0.2 });
-
-			for (LocationId j = 0; j < numLocations; ++j)
-			{
-				if (i == j)
-				{
-					continue;
-				}
-
-				model.addFare(i, Fare(Seconds{ (i + j) * 0.54 }, j));
-			}
-		}
-
-		{
-			Seconds total{ 0.0 };
-			for (int i = 0; i < 10; ++i)
-			{
-				total += model.simulateFares(numFares, rng).averageTime;
-			}
-			std::cout << "Before optimization: " << total.count() << "s\n";
-
-			for (int i = 0; i < optimizationTries; ++i)
-			{
-				model.optimize(optimizationIters, numFares, rng);
-
-				total = Seconds{ 0.0 };
-				for (int i = 0; i < 10; ++i)
-				{
-					total += model.simulateFares(numFares, rng).totalTime;
-				}
-				std::cout << "After optimization try " << i << ": " << total.count() << "s\n";
-			}
-
-			model.print();
-		}
-	}
-
 	struct Point
 	{
 		double x, y;
@@ -790,70 +695,6 @@ namespace gtasa_taxi_sim
 		return model;
 	}
 
-	void testRandomModel()
-	{
-		constexpr LocationId numLocations = 20;
-		constexpr int numFares = 50;
-		constexpr int optimizationIters = 100;
-		constexpr int optimizationTries = 100;
-
-		std::mt19937_64 rng(1234);
-
-		auto model = generateRandomModel(numLocations, rng);
-
-		model.print();
-
-		{
-			Seconds total{ 0.0 };
-			for (int i = 0; i < 10; ++i)
-			{
-				total += model.simulateFares(numFares, rng).totalTime;
-			}
-			std::cout << "Before optimization: " << total.count() << "s\n";
-
-			for (int i = 0; i < optimizationTries; ++i)
-			{
-				model.optimize(optimizationIters, numFares, rng);
-
-				total = Seconds{ 0.0 };
-				for (int i = 0; i < 10; ++i)
-				{
-					total += model.simulateFares(numFares, rng).totalTime;
-				}
-				std::cout << "After optimization try " << i << ": " << total.count() << "s\n";
-			}
-
-			model.print();
-		}
-	}
-
-	void testFileModel()
-	{
-		const fs::path modelFilename = "../../../examples/model.model";
-		const fs::path configFilename = "../../../examples/optimization.cfg";
-
-		constexpr int numFares = 50;
-		constexpr int optimizationIters = 100;
-		constexpr int optimizationTries = 100;
-
-		std::mt19937_64 rng(1234);
-
-		auto model = loadModelFromFile(modelFilename);
-		auto config = loadOptimizationParameters(configFilename);
-
-		model.print();
-
-		{
-			std::cout << "Before optimization: " << model.simulateFares(numFares, 10, rng).averageTime.count() << "s\n";
-
-			model.optimize(config, std::cout, rng);
-
-			std::cout << "After optimization: " << model.simulateFares(numFares, 10, rng).averageTime.count() << "s\n";
-
-			model.print();
-		}
-	}
-
 	void process(const std::vector<std::string>& args)
 	{
 		if (args.size() < 3)
@@ -880,6 +721,7 @@ namespace gtasa_taxi_sim
 void help()
 {
 	std::cout << "Usage: gtasa_taxi_sim.exe config_path input_model_path output_model_path\n";
+	std::cout << "Example: gtasa_taxi_sim.exe examples/optimization.cfg random.model out.model\n";
 }
 
 int main(int argc, char** argv)
