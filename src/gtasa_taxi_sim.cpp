@@ -49,6 +49,11 @@ namespace gtasa_taxi_sim
 	struct SimulationResult
 	{
 		Seconds totalTime;
+
+		void operator+=(const SimulationResult& rhs)
+		{
+			totalTime += rhs.totalTime;
+		}
 	};
 
 	struct OptimizationParameters
@@ -59,7 +64,6 @@ namespace gtasa_taxi_sim
 		double endTemperatureAfter = 0.67;
 		std::uint64_t numFaresToComplete = 50;
 		std::uint64_t numBatches = 100;
-		std::uint64_t numIterationsPerBatch = 100;
 		std::uint64_t numAveragedSimulations = 100;
 
 		[[nodiscard]] static OptimizationParameters fromStream(std::istream& in)
@@ -93,10 +97,6 @@ namespace gtasa_taxi_sim
 				else if (token == "num_batches"sv)
 				{
 					in >> params.numBatches;
-				}
-				else if (token == "num_iterations_per_batch"sv)
-				{
-					in >> params.numIterationsPerBatch;
 				}
 				else if (token == "num_averaged_simulations"sv)
 				{
@@ -273,6 +273,21 @@ namespace gtasa_taxi_sim
 		}
 
 		template <typename RngT>
+		[[nodiscard]] SimulationResult simulateFares(LocationId startLocation, int numFares, std::uint64_t numSimulations, RngT&& rng)
+		{
+			SimulationResult result;
+
+			result.totalTime = Seconds{ 0.0 };
+
+			for (std::uint64_t i = 0; i < numSimulations; ++i)
+			{
+				result += simulateFares(startLocation, numFares, rng);
+			}
+
+			return result;
+		}
+
+		template <typename RngT>
 		[[nodiscard]] std::pair<const Fare&, bool> chooseRandomFare(LocationId from, RngT&& rng)
 		{
 			const auto& fares = m_fares[from];
@@ -304,9 +319,37 @@ namespace gtasa_taxi_sim
 				const double temperature =
 					t > endTemperatureAtT
 					? endTemperature
-					: (endTemperatureAtT - t) * startTemperature + t * endTemperature;
+					: (endTemperatureAtT - t) / endTemperatureAtT * startTemperature + t * endTemperature;
 
 				optimizeSingleIteration(temperature, startLocation, numFares, rng);
+			}
+		}
+
+		template <typename RngT>
+		void optimize(const OptimizationParameters& params, RngT&& rng)
+		{
+			auto prevResult = simulateFares(0, params.numFaresToComplete, params.numAveragedSimulations, rng);
+			auto bestResult = prevResult;
+			auto bestState = *this;
+
+			for (std::uint64_t i = 0; i < params.numBatches; ++i)
+			{
+				const double t = static_cast<double>(i) / (params.numBatches - 1);
+
+				const double temperature =
+					t > params.endTemperatureAfter
+					? params.endTemperature
+					: (params.endTemperatureAfter - t) / params.endTemperatureAfter * params.startTemperature + t * params.endTemperature;
+
+				auto newResult = optimizeSingleBatch(params, prevResult, temperature, rng);
+
+				if (newResult.totalTime < bestResult.totalTime)
+				{
+					bestResult = newResult;
+					bestState = *this;
+				}
+
+				prevResult = newResult;
 			}
 		}
 
@@ -374,6 +417,21 @@ namespace gtasa_taxi_sim
 		std::vector<Seconds> m_avgNextFareSearchTime;
 		std::vector<std::vector<Fare>> m_fares;
 		std::vector<FareId> m_numEnabledFares;
+
+		template <typename RngT>
+		[[nodiscard]] SimulationResult optimizeSingleBatch(const OptimizationParameters& params, const SimulationResult& prevResult, double temperature, RngT&& rng)
+		{
+			auto [location, fare] = toggleRandomFare(rng);
+
+			auto newResult = simulateFares(0, params.numFaresToComplete, params.numAveragedSimulations, rng);
+
+			if (newResult.totalTime > prevResult.totalTime * temperature)
+			{
+				(void)toggleFare(location, fare);
+			}
+
+			return newResult;
+		}
 
 		template <typename RngT>
 		void optimizeSingleIteration(double temperature, LocationId startLocation, int numFares, RngT&& rng)
@@ -671,17 +729,14 @@ namespace gtasa_taxi_sim
 			}
 			std::cout << "Before optimization: " << total.count() << "s\n";
 
-			for (int i = 0; i < optimizationTries; ++i)
-			{
-				model.optimize(optimizationIters, startLocation, numFares, rng);
+			model.optimize(config, rng);
 
-				total = Seconds{ 0.0 };
-				for (int i = 0; i < 10; ++i)
-				{
-					total += model.simulateFares(startLocation, numFares, rng).totalTime;
-				}
-				std::cout << "After optimization try " << i << ": " << total.count() << "s\n";
+			total = Seconds{ 0.0 };
+			for (int i = 0; i < 10; ++i)
+			{
+				total += model.simulateFares(startLocation, numFares, rng).totalTime;
 			}
+			std::cout << "After optimization: " << total.count() << "s\n";
 
 			model.print(startLocation);
 		}
