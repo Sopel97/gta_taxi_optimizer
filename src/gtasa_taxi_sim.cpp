@@ -364,6 +364,8 @@ namespace gtasa_taxi_sim
 
 				prevResult = newResult;
 			}
+
+			*this = std::move(bestState);
 		}
 
 		void print(LocationId start) const
