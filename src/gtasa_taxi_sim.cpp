@@ -245,6 +245,8 @@ namespace gtasa_taxi_sim
 			{
 				(void)toggleFare(from, static_cast<FareId>(m_fares[from].size() - 1));
 			}
+
+			m_isFareLocationDistributionUpToDate = false;
 		}
 
 		[[nodiscard]] Seconds avgNextFareSearchTime(LocationId location) const
@@ -473,6 +475,9 @@ namespace gtasa_taxi_sim
 		std::vector<std::vector<Fare>> m_fares;
 		std::vector<FareId> m_numEnabledFares;
 
+		std::discrete_distribution<LocationId> m_fareLocationDistribution;
+		bool m_isFareLocationDistributionUpToDate = false;
+
 		template <typename RngT>
 		[[nodiscard]] SimulationResult optimizeSingleBatch(const OptimizationParameters& params, const SimulationResult& prevResult, double temperature, RngT&& rng)
 		{
@@ -559,23 +564,36 @@ namespace gtasa_taxi_sim
 			}
 		}
 
-		template <typename RngT>
-		[[nodiscard]] std::pair<LocationId, FareId> toggleRandomFare(RngT&& rng)
+		void updateFareLocationDistribution()
 		{
-			// TODO: make this uniform
-
-			for (;;)
+			std::vector<FareId> counts;
+			counts.reserve(m_avgNextFareSearchTime.size());
+			for (const auto& fares : m_fares)
 			{
-				const auto locationId = std::uniform_int_distribution<LocationId>(
-					0,
-					numLocations() - 1
-					)(rng);
-
 				// We need to find a location where we can even toggle a fare.
-				if (m_fares[locationId].size() <= 1)
+				if (fares.size() <= 1)
 				{
 					continue;
 				}
+
+				counts.emplace_back(static_cast<FareId>(fares.size()));
+			}
+
+			m_fareLocationDistribution = 
+				std::discrete_distribution<LocationId>(counts.begin(), counts.end());
+		}
+
+		template <typename RngT>
+		[[nodiscard]] std::pair<LocationId, FareId> toggleRandomFare(RngT&& rng)
+		{
+			if (!m_isFareLocationDistributionUpToDate)
+			{
+				updateFareLocationDistribution();
+			}
+
+			for (;;)
+			{
+				const auto locationId = m_fareLocationDistribution(rng);
 
 				const auto fareId = toggleRandomFare(locationId, rng);
 
