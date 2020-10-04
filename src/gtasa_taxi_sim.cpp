@@ -437,6 +437,8 @@ namespace gtasa_taxi_sim
 				out << "loc " << loc << " " << m_avgNextFareSearchTime[loc].count() << '\n';
 			}
 
+			out << '\n';
+
 			for (LocationId from = 0; from < m_avgNextFareSearchTime.size(); ++from)
 			{
 				FareId fareId = 0;
@@ -451,6 +453,8 @@ namespace gtasa_taxi_sim
 					const auto& fare = m_fares[from][fareId];
 					out << "fare " << from << " " << fare.destination() << " " << fare.avgDriveTime().count() << " disabled\n";
 				}
+
+				out << '\n';
 			}
 		}
 
