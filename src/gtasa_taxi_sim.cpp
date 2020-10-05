@@ -54,9 +54,11 @@ namespace gtasa_taxi_sim
 
 	struct SimulationResult
 	{
-		Seconds totalTime;
-		Seconds averageTime;
-		std::uint64_t numSimulations;
+		Seconds totalTime{ 0.0 };
+		Seconds averageTime{ 0.0 };
+		Seconds minTime{ std::numeric_limits<double>::max() };
+		Seconds maxTime{ 0.0 };
+		std::uint64_t numSimulations{ 0 };
 
 		void operator+=(const SimulationResult& rhs)
 		{
@@ -64,6 +66,8 @@ namespace gtasa_taxi_sim
 			averageTime = 
 				(averageTime * numSimulations + rhs.averageTime * rhs.numSimulations)
 				/ (numSimulations + rhs.numSimulations);
+			minTime = std::min(minTime, rhs.minTime);
+			maxTime = std::max(maxTime, rhs.maxTime);
 			numSimulations += rhs.numSimulations;
 		}
 	};
@@ -330,9 +334,7 @@ namespace gtasa_taxi_sim
 		template <typename RngT>
 		[[nodiscard]] SimulationResult simulateFares(std::uint64_t numFares, RngT&& rng)
 		{
-			SimulationResult result;
-
-			result.totalTime = Seconds{ 0.0 };
+			SimulationResult result{};
 
 			LocationId currentLocation = startLocation;
 			for (int i = 0; i < numFares; ++i)
@@ -351,6 +353,8 @@ namespace gtasa_taxi_sim
 			}
 
 			result.averageTime = result.totalTime;
+			result.minTime = result.totalTime;
+			result.maxTime = result.totalTime;
 			result.numSimulations = 1;
 
 			return result;
@@ -359,11 +363,7 @@ namespace gtasa_taxi_sim
 		template <typename RngT>
 		[[nodiscard]] SimulationResult simulateFares(std::uint64_t numFares, std::uint64_t numSimulations, RngT&& rng)
 		{
-			SimulationResult result;
-
-			result.totalTime = Seconds{ 0.0 };
-			result.averageTime = Seconds{ 0.0 };
-			result.numSimulations = 0;
+			SimulationResult result{};
 
 			for (std::uint64_t i = 0; i < numSimulations; ++i)
 			{
