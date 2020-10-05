@@ -837,14 +837,11 @@ namespace gtasa_taxi_sim
         template <typename RngT>
         [[nodiscard]] std::pair<LocationId, FareId> toggleRandomFare(RngT&& rng)
         {
-            for (;;)
-            {
-                const auto locationId = m_fareLocationDistribution(rng);
+            const auto locationId = m_fareLocationDistribution(rng);
 
-                const auto fareId = toggleRandomFare(locationId, rng);
+            const auto fareId = toggleRandomFare(locationId, rng);
 
-                return { locationId, fareId };
-            }
+            return { locationId, fareId };
         }
     };
 
