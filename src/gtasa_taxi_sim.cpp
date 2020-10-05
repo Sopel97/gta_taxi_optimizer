@@ -52,6 +52,35 @@ namespace gtasa_taxi_sim
 		LocationId m_destination;
 	};
 
+	enum struct OptimizationTarget
+	{
+		Avg,
+		Min,
+		Max
+	};
+
+	[[nodiscard]] OptimizationTarget optimizationTargetFromString(const std::string& str)
+	{
+		using namespace std::literals;
+
+		if (str == "avg"sv)
+		{
+			return OptimizationTarget::Avg;
+		}
+		else if (str == "min"sv)
+		{
+			return OptimizationTarget::Min;
+		}
+		else if (str == "max"sv)
+		{
+			return OptimizationTarget::Max;
+		}
+		else
+		{
+			throw std::runtime_error("Invalid optimization target " + str);
+		}
+	}
+
 	struct SimulationResult
 	{
 		Seconds totalTime{ 0.0 };
@@ -69,6 +98,31 @@ namespace gtasa_taxi_sim
 			minTime = std::min(minTime, rhs.minTime);
 			maxTime = std::max(maxTime, rhs.maxTime);
 			numSimulations += rhs.numSimulations;
+		}
+
+		[[nodiscard]] std::string toString() const
+		{
+			return
+				std::to_string(averageTime.count()) + "s avg; "
+				+ std::to_string(minTime.count()) + "s min; "
+				+ std::to_string(maxTime.count()) + "s max; ";
+		}
+
+		[[nodiscard]] bool isBetterThan(const SimulationResult& rhs, OptimizationTarget optTarget, double temperature = 1.0) const
+		{
+			switch (optTarget)
+			{
+			case OptimizationTarget::Avg:
+				return averageTime < rhs.averageTime * temperature;
+
+			case OptimizationTarget::Min:
+				return minTime < rhs.minTime * temperature;
+
+			case OptimizationTarget::Max:
+				return maxTime < rhs.maxTime * temperature;
+			}
+
+			return false;
 		}
 	};
 
@@ -136,6 +190,9 @@ namespace gtasa_taxi_sim
 		// The maximal number of fares to toggle in a single permutation stage.
 		std::uint64_t maxToggledFares = 1;
 
+		// What result should be optimizied. [avg/min/max]
+		OptimizationTarget optimizationTarget = OptimizationTarget::Avg;
+
 		[[nodiscard]] static OptimizationParameters fromStream(std::istream& in)
 		{
 			using namespace std::literals;
@@ -189,6 +246,12 @@ namespace gtasa_taxi_sim
 				else if (token == "max_toggled_fares"sv)
 				{
 					in >> params.maxToggledFares;
+				}
+				else if (token == "optimization_target"sv)
+				{
+					std::string optStr;
+					in >> optStr;
+					params.optimizationTarget = optimizationTargetFromString(optStr);
 				}
 				else
 				{
@@ -447,12 +510,12 @@ namespace gtasa_taxi_sim
 						rng, 
 						threadRngs);
 
-					if (newResult.averageTime < bestResult.averageTime)
+					if (newResult.isBetterThan(bestResult, params.optimizationTarget))
 					{
 						bestResult = newResult;
 						bestState = *this;
 
-						report << "New best: " << newResult.averageTime.count() << "s avg.\n";
+						report << "New best: " << newResult.toString() << "\n";
 					}
 
 					prevResult = newResult;
@@ -624,7 +687,7 @@ namespace gtasa_taxi_sim
 				newResult += future.get();
 			}
 
-			if (newResult.averageTime > prevResult.averageTime * temperature)
+			if (newResult.isBetterThan(prevResult, params.optimizationTarget, temperature))
 			{
 				// Fares have to be toggled back in the reverse order.
 				for (std::uint64_t i = numFaresToToggle - 1; i < numFaresToToggle; --i)
@@ -837,7 +900,7 @@ void help()
 
 int main(int argc, char** argv)
 {
-	gtasa_taxi_sim::process({ "../../../examples/optimization_mt.cfg", "../../../examples/random.model" , "../../../examples/out2.model" });
+	gtasa_taxi_sim::process({ "../../../examples/optimization_mt_max.cfg", "../../../examples/random.model" , "../../../examples/out2.model" });
 	return 0;
 	if (argc < 4)
 	{

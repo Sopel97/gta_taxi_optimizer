@@ -93,6 +93,8 @@ This file can represent the parameters used for the optimization. It's structure
 
 `max_toggled_fares` - The maximal number of fares to toggle in a single permutation stage.
 
+`optimization_target` - What result should be optimizied. [avg/min/max]
+
 The default settings are
 
 ```
@@ -106,4 +108,5 @@ num_averaged_simulations 100
 num_threads 1
 min_toggled_fares 1
 max_toggled_fares 1
+optimization_target avg
 ```
