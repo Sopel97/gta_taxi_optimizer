@@ -900,8 +900,6 @@ void help()
 
 int main(int argc, char** argv)
 {
-	gtasa_taxi_sim::process({ "../../../examples/optimization_mt_max.cfg", "../../../examples/random.model" , "../../../examples/out2.model" });
-	return 0;
 	if (argc < 4)
 	{
 		help();
