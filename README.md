@@ -89,6 +89,10 @@ This file can represent the parameters used for the optimization. It's structure
 
 `num_threads` - Number of threads to use during optimization
 
+`min_toggled_fares` - The minimal number of fares to toggle in a single permutation stage.
+
+`max_toggled_fares` - The maximal number of fares to toggle in a single permutation stage.
+
 The default settings are
 
 ```
@@ -100,4 +104,6 @@ num_batches 10
 num_temperature_stages 100
 num_averaged_simulations 100
 num_threads 1
+min_toggled_fares 1
+max_toggled_fares 1
 ```

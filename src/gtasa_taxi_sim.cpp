@@ -130,6 +130,12 @@ namespace gtasa_taxi_sim
 
 		std::uint64_t numThreads = 1;
 
+		// The minimal number of fares to toggle in a single permutation stage.
+		std::uint64_t minToggledFares = 1;
+
+		// The maximal number of fares to toggle in a single permutation stage.
+		std::uint64_t maxToggledFares = 1;
+
 		[[nodiscard]] static OptimizationParameters fromStream(std::istream& in)
 		{
 			using namespace std::literals;
@@ -175,6 +181,14 @@ namespace gtasa_taxi_sim
 				else if (token == "num_threads"sv)
 				{
 					in >> params.numThreads;
+				}
+				else if (token == "min_toggled_fares"sv)
+				{
+					in >> params.minToggledFares;
+				}
+				else if (token == "max_toggled_fares"sv)
+				{
+					in >> params.maxToggledFares;
 				}
 				else
 				{
@@ -563,7 +577,18 @@ namespace gtasa_taxi_sim
 			RngT& rng,
 			std::vector<RngT>& threadRngs)
 		{
-			auto [location, fare] = toggleRandomFare(rng);
+
+			const std::uint64_t numFaresToToggle =
+				std::uniform_int_distribution<std::uint64_t>(
+					params.minToggledFares,
+					params.maxToggledFares
+					)(rng);
+
+			std::vector<std::pair<LocationId, FareId>> toggledFares;
+			for (std::uint64_t i = 0; i < numFaresToToggle; ++i)
+			{
+				toggledFares.emplace_back(toggleRandomFare(rng));
+			}
 
 			updateFareLocationDistribution();
 
@@ -601,7 +626,12 @@ namespace gtasa_taxi_sim
 
 			if (newResult.averageTime > prevResult.averageTime * temperature)
 			{
-				(void)toggleFare(location, fare);
+				// Fares have to be toggled back in the reverse order.
+				for (std::uint64_t i = numFaresToToggle - 1; i < numFaresToToggle; --i)
+				{
+					auto& [location, fare] = toggledFares[i];
+					(void)toggleFare(location, fare);
+				}
 			}
 
 			return newResult;
