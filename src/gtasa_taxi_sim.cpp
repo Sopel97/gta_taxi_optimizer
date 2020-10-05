@@ -420,7 +420,7 @@ namespace gtasa_taxi_sim
         }
 
         template <typename RngT>
-        [[nodiscard]] SimulationResult simulateFares(std::uint64_t numFares, RngT&& rng)
+        [[nodiscard]] SimulationResult simulateFares(std::uint64_t numFares, RngT& rng)
         {
             SimulationResult result{};
 
@@ -449,7 +449,7 @@ namespace gtasa_taxi_sim
         }
 
         template <typename RngT>
-        [[nodiscard]] SimulationResult simulateFares(std::uint64_t numFares, std::uint64_t numSimulations, RngT&& rng)
+        [[nodiscard]] SimulationResult simulateFares(std::uint64_t numFares, std::uint64_t numSimulations, RngT& rng)
         {
             SimulationResult result{};
 
@@ -462,7 +462,7 @@ namespace gtasa_taxi_sim
         }
 
         template <typename RngT>
-        [[nodiscard]] SimulationResult simulateFares(OptimizationTarget target, double outliersPct, std::uint64_t numFares, std::uint64_t numSimulations, RngT&& rng)
+        [[nodiscard]] SimulationResult simulateFares(OptimizationTarget target, double outliersPct, std::uint64_t numFares, std::uint64_t numSimulations, RngT& rng)
         {
             constexpr double eps = 0.00001;
 
@@ -508,7 +508,7 @@ namespace gtasa_taxi_sim
         }
 
         template <typename RngT>
-        [[nodiscard]] std::pair<const Fare&, bool> chooseRandomFare(LocationId from, RngT&& rng)
+        [[nodiscard]] std::pair<const Fare&, bool> chooseRandomFare(LocationId from, RngT& rng)
         {
             const auto& fares = m_faresFromLocation[from];
 
@@ -545,7 +545,11 @@ namespace gtasa_taxi_sim
                 threadRngs.emplace_back(nextSeed());
             }
 
-            auto prevResult = simulateFares(params.numFaresToComplete, params.numAveragedSimulations, rng);
+            auto prevResult = simulateFares(
+                params,
+                rng,
+                threadRngs
+            );
             auto bestResult = prevResult;
             auto bestState = *this;
 
@@ -565,7 +569,8 @@ namespace gtasa_taxi_sim
                         prevResult,
                         temperature,
                         rng,
-                        threadRngs);
+                        threadRngs
+                        );
 
                     if (newResult.isBetterThan(bestResult, params.optimizationTarget))
                     {
@@ -690,28 +695,11 @@ namespace gtasa_taxi_sim
         bool m_isFareLocationDistributionUpToDate = false;
 
         template <typename RngT>
-        [[nodiscard]] SimulationResult optimizeSingleBatch(
-            const OptimizationParameters& params,
-            const SimulationResult& prevResult,
-            double temperature,
-            RngT& rng,
+        [[nodiscard]] SimulationResult simulateFares(
+            const OptimizationParameters& params, 
+            RngT& rng, 
             std::vector<RngT>& threadRngs)
         {
-
-            const std::uint64_t numFaresToToggle =
-                std::uniform_int_distribution<std::uint64_t>(
-                    params.minToggledFares,
-                    params.maxToggledFares
-                    )(rng);
-
-            std::vector<std::pair<LocationId, FareId>> toggledFares;
-            for (std::uint64_t i = 0; i < numFaresToToggle; ++i)
-            {
-                toggledFares.emplace_back(toggleRandomFare(rng));
-            }
-
-            updateFareLocationDistribution();
-
             const std::uint64_t numThreads = params.safeNumThreads();
             const std::uint64_t jobSize = params.numAveragedSimulations / numThreads + 1;
 
@@ -722,13 +710,14 @@ namespace gtasa_taxi_sim
                 const bool isLast = i == numThreads - 1;
                 auto& hereRng = isLast ? rng : threadRngs[i];
 
-                auto job = [this, i, jobSize, &hereRng, &params](){
+                auto job = [this, i, jobSize, &hereRng, &params]() {
                     return simulateFares(
                         params.optimizationTarget,
                         params.outliersPct,
                         params.numFaresToComplete,
                         jobSize,
-                        hereRng);
+                        hereRng
+                    );
                 };
 
                 if (isLast)
@@ -748,6 +737,37 @@ namespace gtasa_taxi_sim
             {
                 newResult += future.get();
             }
+
+            return newResult;
+        }
+
+        template <typename RngT>
+        [[nodiscard]] SimulationResult optimizeSingleBatch(
+            const OptimizationParameters& params,
+            const SimulationResult& prevResult,
+            double temperature,
+            RngT& rng,
+            std::vector<RngT>& threadRngs)
+        {
+            const std::uint64_t numFaresToToggle =
+                std::uniform_int_distribution<std::uint64_t>(
+                    params.minToggledFares,
+                    params.maxToggledFares
+                    )(rng);
+
+            std::vector<std::pair<LocationId, FareId>> toggledFares;
+            for (std::uint64_t i = 0; i < numFaresToToggle; ++i)
+            {
+                toggledFares.emplace_back(toggleRandomFare(rng));
+            }
+
+            updateFareLocationDistribution();
+
+            SimulationResult newResult = simulateFares(
+                params,
+                rng,
+                threadRngs
+            );
 
             if (newResult.isBetterThan(prevResult, params.optimizationTarget, temperature))
             {
