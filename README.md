@@ -95,6 +95,8 @@ This file can represent the parameters used for the optimization. It's structure
 
 `optimization_target` - What result should be optimizied. [avg/min/max]
 
+`outliers_pct` - A value in range [0..1]. It signifies the number of outliers to remove before aggregating the simulation results. Removal is performed on job level, not after all threads complete the simulations.
+
 The default settings are
 
 ```
@@ -109,4 +111,5 @@ num_threads 1
 min_toggled_fares 1
 max_toggled_fares 1
 optimization_target avg
+outliers_pct 0.0
 ```

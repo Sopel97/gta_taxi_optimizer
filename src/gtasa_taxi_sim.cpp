@@ -14,6 +14,7 @@
 #include <fstream>
 #include <optional>
 #include <future>
+#include <algorithm>
 
 #include "Array2.h"
 
@@ -193,6 +194,12 @@ namespace gtasa_taxi_sim
 		// What result should be optimizied. [avg/min/max]
 		OptimizationTarget optimizationTarget = OptimizationTarget::Avg;
 
+		// A value in range [0..1]. It signifies the number of outliers to remove
+		// before aggregating the simulation results.
+		// Removal is performed on job level, not after all threads
+		// complete the simulations.
+		double outliersPct = 0.0;
+
 		[[nodiscard]] static OptimizationParameters fromStream(std::istream& in)
 		{
 			using namespace std::literals;
@@ -252,6 +259,10 @@ namespace gtasa_taxi_sim
 					std::string optStr;
 					in >> optStr;
 					params.optimizationTarget = optimizationTargetFromString(optStr);
+				}
+				else if (token == "outliers_pct"sv)
+				{
+					in >> params.outliersPct;
 				}
 				else
 				{
@@ -445,6 +456,52 @@ namespace gtasa_taxi_sim
 			for (std::uint64_t i = 0; i < numSimulations; ++i)
 			{
 				result += simulateFares(numFares, rng);
+			}
+
+			return result;
+		}
+
+		template <typename RngT>
+		[[nodiscard]] SimulationResult simulateFares(OptimizationTarget target, double outliersPct, std::uint64_t numFares, std::uint64_t numSimulations, RngT&& rng)
+		{
+			constexpr double eps = 0.00001;
+
+			if (numSimulations == 0)
+			{
+				return {};
+			}
+
+			const std::uint64_t outliersOnEachSide = std::clamp<std::uint64_t>(
+				static_cast<std::uint64_t>(outliersPct * 0.5 * numSimulations),
+				0,
+				(numSimulations - 1) / 2);
+
+			if (outliersOnEachSide == 0)
+			{
+				return simulateFares(numFares, numSimulations, std::forward<RngT>(rng));
+			}
+
+			std::vector<SimulationResult> results;
+			results.reserve(numSimulations);
+
+			for (std::uint64_t i = 0; i < numSimulations; ++i)
+			{
+				results.emplace_back(simulateFares(numFares, rng));
+			}
+
+			std::sort(
+				results.begin(), 
+				results.end(), 
+				[target](const auto& lhs, const auto& rhs) {
+					return lhs.isBetterThan(rhs, target); 
+				}
+			);
+
+			SimulationResult result{};
+
+			for (std::uint64_t i = outliersOnEachSide; i < numSimulations - outliersOnEachSide; ++i)
+			{
+				result += results[i];
 			}
 
 			return result;
@@ -666,7 +723,12 @@ namespace gtasa_taxi_sim
 				auto& hereRng = isLast ? rng : threadRngs[i];
 
 				auto job = [this, i, jobSize, &hereRng, &params](){
-					return simulateFares(params.numFaresToComplete, jobSize, hereRng);
+					return simulateFares(
+						params.optimizationTarget, 
+						params.outliersPct, 
+						params.numFaresToComplete, 
+						jobSize, 
+						hereRng);
 				};
 
 				if (isLast)
