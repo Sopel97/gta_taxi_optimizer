@@ -87,6 +87,8 @@ This file can represent the parameters used for the optimization. It's structure
 
 `num_averaged_simulations` - Number of simulations to use for model quality estimate.
 
+`num_threads` - Number of threads to use during optimization
+
 The default settings are
 
 ```
@@ -97,4 +99,5 @@ num_fares_to_complete 50
 num_batches 10
 num_temperature_stages 100
 num_averaged_simulations 100
+num_threads 1
 ```

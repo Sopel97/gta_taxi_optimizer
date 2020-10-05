@@ -13,4 +13,6 @@ set_property(TARGET gtasa_taxi_sim PROPERTY CXX_STANDARD_REQUIRED ON)
 
 target_include_directories(gtasa_taxi_sim PRIVATE "src")
 
+set_property(TARGET gtasa_taxi_sim PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 # TODO: Add tests and install targets if needed.
