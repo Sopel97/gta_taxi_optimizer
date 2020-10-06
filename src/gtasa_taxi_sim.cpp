@@ -15,8 +15,69 @@
 #include <optional>
 #include <future>
 #include <algorithm>
+#include <immintrin.h>
 
 #include "Array2.h"
+
+#if defined(__clang__) || defined(__GNUC__) || defined(__GNUG__)
+
+#define FORCEINLINE __attribute__((always_inline))
+#define NOINLINE __attribute__((noinline))
+
+#elif defined(_MSC_VER)
+
+#define FORCEINLINE __forceinline
+#define NOINLINE __declspec(noinline)
+
+#else
+
+#define FORCEINLINE inline
+#define NOINLINE
+
+#endif
+
+namespace simd
+{
+    FORCEINLINE void xor_eq_128_epi32(std::uint32_t* lhs, const std::uint32_t* rhs)
+    {
+        __m128i t0 = _mm_load_si128(reinterpret_cast<const __m128i*>(lhs));
+        __m128i t1 = _mm_load_si128(reinterpret_cast<const __m128i*>(rhs));
+        t0 = _mm_xor_si128(t0, t1);
+        _mm_store_si128(reinterpret_cast<__m128i*>(lhs), t0);
+    }
+
+    FORCEINLINE void add_eq_128_epi32(std::uint32_t* lhs, const std::uint32_t* rhs)
+    {
+        __m128i t0 = _mm_load_si128(reinterpret_cast<const __m128i*>(lhs));
+        __m128i t1 = _mm_load_si128(reinterpret_cast<const __m128i*>(rhs));
+        t0 = _mm_add_epi32(t0, t1);
+        _mm_store_si128(reinterpret_cast<__m128i*>(lhs), t0);
+    }
+
+    FORCEINLINE void add_eq_128_epi32(std::uint32_t* ass, const std::uint32_t* lhs, const std::uint32_t* rhs)
+    {
+        __m128i t0 = _mm_load_si128(reinterpret_cast<const __m128i*>(lhs));
+        __m128i t1 = _mm_load_si128(reinterpret_cast<const __m128i*>(rhs));
+        t0 = _mm_add_epi32(t0, t1);
+        _mm_store_si128(reinterpret_cast<__m128i*>(ass), t0);
+    }
+
+    FORCEINLINE void slli_eq_128_epi32(std::uint32_t* ass, const std::uint32_t* lhs, int rhs)
+    {
+        __m128i t0 = _mm_load_si128(reinterpret_cast<const __m128i*>(lhs));
+        t0 = _mm_slli_epi32(t0, rhs);
+        _mm_store_si128(reinterpret_cast<__m128i*>(ass), t0);
+    }
+
+    FORCEINLINE void rotl_eq_128_epi32(std::uint32_t* lhs, int rhs)
+    {
+        __m128i t0 = _mm_load_si128(reinterpret_cast<__m128i*>(lhs));
+        __m128i t1 = _mm_slli_epi32(t0, rhs);
+        t0 = _mm_srli_epi32(t0, 32 - rhs);
+        t0 = _mm_or_si128(t0, t1);
+        _mm_store_si128(reinterpret_cast<__m128i*>(lhs), t0);
+    }
+}
 
 namespace gtasa_taxi_sim
 {
@@ -25,6 +86,110 @@ namespace gtasa_taxi_sim
     using Seconds = std::chrono::duration<double>;
     using LocationId = std::uint32_t;
     using FareId = std::uint32_t;
+
+    struct alignas(64) Xoroshiro256
+    {
+        static constexpr std::size_t bufferSize = 1024;
+        static constexpr std::size_t unrollSize = 16;
+
+        static_assert(unrollSize == 16, "Caution required. Unrolled manually.");
+        static_assert(bufferSize % unrollSize == 0);
+
+        using result_type = std::uint32_t;
+
+        [[nodiscard]] static std::uint32_t min()
+        {
+            return 0;
+        }
+
+        [[nodiscard]] static std::uint32_t max()
+        {
+            return std::numeric_limits<std::uint32_t>::max();
+        }
+
+        Xoroshiro256(std::uint64_t seed)
+        {
+            init(seed);
+        }
+
+        [[nodiscard]] FORCEINLINE std::uint32_t operator()()
+        {
+            if (idx == 0)
+            {
+                refillBuffer();
+            }
+
+            return buffer[--idx];
+        }
+
+    private:
+        std::uint32_t s[4][unrollSize];
+        std::uint32_t buffer[bufferSize];
+        std::uint32_t idx = 0;
+
+        void init(std::uint64_t seed)
+        {
+            std::mt19937 rng(seed);
+            for (int i = 0; i < 4; ++i)
+            {
+                for (int j = 0; j < unrollSize; ++j)
+                {
+                    s[i][j] = rng();
+                }
+            }
+        }
+
+        NOINLINE void refillBuffer()
+        {
+            using namespace ::simd;
+
+            std::uint32_t t[unrollSize];
+
+            for (int i = 0; i < bufferSize; i += unrollSize) {
+                add_eq_128_epi32(&buffer[i], &s[0][0], &s[3][0]);
+                add_eq_128_epi32(&buffer[i + 4], &s[0][4], &s[3][4]);
+                add_eq_128_epi32(&buffer[i + 8], &s[0][8], &s[3][8]);
+                add_eq_128_epi32(&buffer[i + 12], &s[0][12], &s[3][12]);
+
+                slli_eq_128_epi32(&t[0], &s[1][0], 9);
+                slli_eq_128_epi32(&t[4], &s[1][4], 9);
+                slli_eq_128_epi32(&t[8], &s[1][8], 9);
+                slli_eq_128_epi32(&t[12], &s[1][12], 9);
+
+                xor_eq_128_epi32(&s[2][0], &s[0][0]);
+                xor_eq_128_epi32(&s[2][4], &s[0][4]);
+                xor_eq_128_epi32(&s[2][8], &s[0][8]);
+                xor_eq_128_epi32(&s[2][12], &s[0][12]);
+
+                xor_eq_128_epi32(&s[3][0], &s[1][0]);
+                xor_eq_128_epi32(&s[3][4], &s[1][4]);
+                xor_eq_128_epi32(&s[3][8], &s[1][8]);
+                xor_eq_128_epi32(&s[3][12], &s[1][12]);
+
+                xor_eq_128_epi32(&s[1][0], &s[2][0]);
+                xor_eq_128_epi32(&s[1][4], &s[2][4]);
+                xor_eq_128_epi32(&s[1][8], &s[2][8]);
+                xor_eq_128_epi32(&s[1][12], &s[2][12]);
+
+                xor_eq_128_epi32(&s[0][0], &s[3][0]);
+                xor_eq_128_epi32(&s[0][4], &s[3][4]);
+                xor_eq_128_epi32(&s[0][8], &s[3][8]);
+                xor_eq_128_epi32(&s[0][12], &s[3][12]);
+
+                xor_eq_128_epi32(&s[2][0], &t[0]);
+                xor_eq_128_epi32(&s[2][4], &t[4]);
+                xor_eq_128_epi32(&s[2][8], &t[8]);
+                xor_eq_128_epi32(&s[2][12], &t[12]);
+
+                rotl_eq_128_epi32(&s[3][0], 11);
+                rotl_eq_128_epi32(&s[3][4], 11);
+                rotl_eq_128_epi32(&s[3][8], 11);
+                rotl_eq_128_epi32(&s[3][12], 11);
+            }
+
+            idx = bufferSize;
+        }
+    };
 
     // Fare represents a fare that a game can generate.
     // It is not attached to an origin.
@@ -964,7 +1129,7 @@ namespace gtasa_taxi_sim
         const auto config = loadOptimizationParameters(configPath);
         auto model = loadModelFromFile(inputModelPath);
 
-        model.optimize(config, std::cout);
+        model.optimize<Xoroshiro256>(config, std::cout);
 
         std::ofstream outfile(outputModelPath);
         model.saveToStream(outfile);
