@@ -365,6 +365,8 @@ namespace gtasa_taxi_sim
         // complete the simulations.
         double outliersPct = 0.0;
 
+        std::uint64_t numFailsToLoadGlobalBestState = 20;
+
         [[nodiscard]] static OptimizationParameters fromStream(std::istream& in)
         {
             using namespace std::literals;
@@ -585,7 +587,7 @@ namespace gtasa_taxi_sim
         }
 
         template <typename RngT>
-        [[nodiscard]] SimulationResult simulateFares(std::uint64_t numFares, RngT& rng)
+        [[nodiscard]] SimulationResult simulateFaresSingleThread(std::uint64_t numFares, RngT& rng)
         {
             SimulationResult result{};
 
@@ -614,20 +616,20 @@ namespace gtasa_taxi_sim
         }
 
         template <typename RngT>
-        [[nodiscard]] SimulationResult simulateFares(std::uint64_t numFares, std::uint64_t numSimulations, RngT& rng)
+        [[nodiscard]] SimulationResult simulateFaresSingleThread(std::uint64_t numFares, std::uint64_t numSimulations, RngT& rng)
         {
             SimulationResult result{};
 
             for (std::uint64_t i = 0; i < numSimulations; ++i)
             {
-                result += simulateFares(numFares, rng);
+                result += simulateFaresSingleThread(numFares, rng);
             }
 
             return result;
         }
 
         template <typename RngT>
-        [[nodiscard]] SimulationResult simulateFares(OptimizationTarget target, double outliersPct, std::uint64_t numFares, std::uint64_t numSimulations, RngT& rng)
+        [[nodiscard]] SimulationResult simulateFaresSingleThread(OptimizationTarget target, double outliersPct, std::uint64_t numFares, std::uint64_t numSimulations, RngT& rng)
         {
             constexpr double eps = 0.00001;
 
@@ -643,7 +645,7 @@ namespace gtasa_taxi_sim
 
             if (outliersOnEachSide == 0)
             {
-                return simulateFares(numFares, numSimulations, std::forward<RngT>(rng));
+                return simulateFaresSingleThread(numFares, numSimulations, std::forward<RngT>(rng));
             }
 
             std::vector<SimulationResult> results;
@@ -651,7 +653,7 @@ namespace gtasa_taxi_sim
 
             for (std::uint64_t i = 0; i < numSimulations; ++i)
             {
-                results.emplace_back(simulateFares(numFares, rng));
+                results.emplace_back(simulateFaresSingleThread(numFares, rng));
             }
 
             std::sort(
@@ -690,7 +692,7 @@ namespace gtasa_taxi_sim
             return { fares[fareId], fareId < m_numEnabledFares[from] };
         }
 
-
+        /*
         // Tries to find a set of fares that minimizes the average
         // simulation time.
         // Uses simple simulation annealing.
@@ -752,6 +754,140 @@ namespace gtasa_taxi_sim
 
                 *this = bestState;
             }
+        }
+        */
+
+        // Tries to find a set of fares that minimizes the average
+        // simulation time.
+        // Uses simple simulation annealing.
+        template <typename RngT = std::mt19937_64>
+        void optimize(const OptimizationParameters& params, std::ostream& report)
+        {
+            const std::uint64_t numThreads = params.safeNumThreads();
+
+            auto nextSeed = [rng = RngT(params.getSeed())]() mutable {
+                return rng() * 6364136223846793005ull;
+            };
+
+            RngT rng(nextSeed());
+
+            std::vector<RngT> threadRngs;
+            for (std::uint64_t i = 0; i < numThreads - 1; ++i)
+            {
+                threadRngs.emplace_back(nextSeed());
+            }
+
+            auto currentResult = simulateFaresMultiThread(
+                params,
+                rng,
+                threadRngs
+            );
+
+            auto bestResult = currentResult;
+            auto bestState = *this;
+
+            struct ThreadState
+            {
+                Model currentModel;
+                Model bestModel;
+                SimulationResult bestResult;
+            };
+
+            std::vector<ThreadState> states;
+            states.reserve(numThreads);
+            for (int i = 0; i < numThreads; ++i)
+            {
+                states.emplace_back(ThreadState{*this, *this, currentResult});
+            }
+
+            std::mutex bestMutex;
+            std::vector<std::future<void>> taskCompletions;
+
+            const std::uint64_t jobSize = params.numBatches / numThreads + 1;
+
+            for (int i = 0; i < numThreads; ++i)
+            {
+                const bool isLast = i == numThreads - 1;
+                auto& hereRng = isLast ? rng : threadRngs[i];
+                auto& state = states[i];
+
+                auto task = [i, jobSize, &report, &rng = hereRng, &bestMutex, &state, &bestResult, &bestState, &params, currentResult]() mutable {
+                    std::uint64_t numFails = 0;
+                    for (std::uint64_t batchId = 0; batchId < jobSize; ++batchId)
+                    {
+                        for (std::uint64_t i = 0; i < params.numTemperatureStages; ++i)
+                        {
+                            const double t = static_cast<double>(i) / (params.numTemperatureStages - 1);
+
+                            const double temperature =
+                                t > params.endTemperatureAfter
+                                ? params.endTemperature
+                                : (params.endTemperatureAfter - t) / params.endTemperatureAfter * params.startTemperature + t * params.endTemperature;
+
+                            const bool improved = state.currentModel.optimizeSingleBatchSingleThread<RngT>(
+                                params,
+                                currentResult,
+                                temperature,
+                                rng
+                                );
+
+                            ++numFails;
+
+                            if (improved && currentResult.isBetterThan(state.bestResult, params.optimizationTarget))
+                            {
+                                state.bestResult = currentResult;
+                                state.bestModel = state.currentModel;
+
+                                std::unique_lock lock(bestMutex);
+
+                                if (currentResult.isBetterThan(bestResult, params.optimizationTarget))
+                                {
+                                    bestResult = currentResult;
+                                    bestState = state.currentModel;
+
+                                    report << "New best: " << currentResult.toString() << "\n";
+
+                                    numFails = 0;
+                                }
+                            }
+                        }
+
+                        if (numFails == params.numFailsToLoadGlobalBestState)
+                        {
+                            std::unique_lock lock(bestMutex);
+
+                            state.currentModel = state.bestModel;
+                            currentResult = bestResult;
+
+                            state.bestModel = bestState;
+                            state.bestResult = bestResult;
+
+                            numFails = 0;
+                        }
+                        else
+                        {
+                            state.currentModel = state.bestModel;
+                            currentResult = state.bestResult;
+                        }
+                    }
+                };
+
+                if (isLast)
+                {
+                    task();
+                }
+                else
+                {
+                    taskCompletions.emplace_back(std::async(std::launch::async, task));
+                }
+            }
+
+            for (auto& f : taskCompletions)
+            {
+                f.wait();
+            }
+
+            *this = bestState;
         }
 
         void print(std::ostream& = std::cout) const
@@ -862,7 +998,7 @@ namespace gtasa_taxi_sim
         bool m_isFareLocationDistributionUpToDate = false;
 
         template <typename RngT>
-        [[nodiscard]] SimulationResult simulateFares(
+        [[nodiscard]] SimulationResult simulateFaresMultiThread(
             const OptimizationParameters& params, 
             RngT& rng, 
             std::vector<RngT>& threadRngs)
@@ -878,7 +1014,7 @@ namespace gtasa_taxi_sim
                 auto& hereRng = isLast ? rng : threadRngs[i];
 
                 auto job = [this, i, jobSize, &hereRng, &params]() {
-                    return simulateFares(
+                    return simulateFaresSingleThread(
                         params.optimizationTarget,
                         params.outliersPct,
                         params.numFaresToComplete,
@@ -909,7 +1045,21 @@ namespace gtasa_taxi_sim
         }
 
         template <typename RngT>
-        [[nodiscard]] bool optimizeSingleBatch(
+        [[nodiscard]] SimulationResult simulateFaresSingleThread(
+            const OptimizationParameters& params,
+            RngT& rng)
+        {
+            return simulateFaresSingleThread(
+                params.optimizationTarget,
+                params.outliersPct,
+                params.numFaresToComplete,
+                params.numAveragedSimulations,
+                rng
+            );
+        }
+
+        template <typename RngT>
+        [[nodiscard]] bool optimizeSingleBatchMultiThread(
             const OptimizationParameters& params,
             SimulationResult& currentResult,
             double temperature,
@@ -930,10 +1080,53 @@ namespace gtasa_taxi_sim
 
             updateFareLocationDistribution();
 
-            SimulationResult newResult = simulateFares(
+            SimulationResult newResult = simulateFaresMultiThread(
                 params,
                 rng,
                 threadRngs
+            );
+
+            if (newResult.isBetterThan(currentResult, params.optimizationTarget, temperature))
+            {
+                // Fares have to be toggled back in the reverse order.
+                for (std::uint64_t i = numFaresToToggle - 1; i < numFaresToToggle; --i)
+                {
+                    auto& [location, fare] = toggledFares[i];
+                    (void)toggleFare(location, fare);
+                }
+
+                currentResult = newResult;
+
+                return true;
+            }
+
+            return false;
+        }
+
+        template <typename RngT>
+        [[nodiscard]] bool optimizeSingleBatchSingleThread(
+            const OptimizationParameters& params,
+            SimulationResult& currentResult,
+            double temperature,
+            RngT& rng)
+        {
+            const std::uint64_t numFaresToToggle =
+                std::uniform_int_distribution<std::uint64_t>(
+                    params.minToggledFares,
+                    params.maxToggledFares
+                    )(rng);
+
+            std::vector<std::pair<LocationId, FareId>> toggledFares;
+            for (std::uint64_t i = 0; i < numFaresToToggle; ++i)
+            {
+                toggledFares.emplace_back(toggleRandomFare(rng));
+            }
+
+            updateFareLocationDistribution();
+
+            SimulationResult newResult = simulateFaresSingleThread(
+                params,
+                rng
             );
 
             if (newResult.isBetterThan(currentResult, params.optimizationTarget, temperature))
