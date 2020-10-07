@@ -631,7 +631,7 @@ namespace gtasa_taxi_sim
 
                     const auto& [fare, isAllowed] = chooseRandomFare(currentLocation, rng);
 
-                    if (!isAllowed)
+                    if (isAllowed)
                     {
                         result.totalTime += fare.avgDriveTime();
                         currentLocation = fare.destination();
