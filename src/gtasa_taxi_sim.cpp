@@ -813,8 +813,9 @@ namespace gtasa_taxi_sim
                                 ? params.endTemperature
                                 : (params.endTemperatureAfter - t) / params.endTemperatureAfter * params.startTemperature + t * params.endTemperature;
 
-                            const bool improved = state.currentModel.optimizeSingleBatchSingleThread<RngT>(
+                            state.currentModel.optimizeOnceSingleThread<RngT>(
                                 params,
+                                state.bestResult,
                                 currentResult,
                                 temperature,
                                 rng
@@ -822,9 +823,7 @@ namespace gtasa_taxi_sim
 
                             ++numConsecutiveFails;
                             
-                            // We gate the expensive stuff behind `improved` and local
-                            // best comparision to lock the mutex as rarely as possible.
-                            if (improved && currentResult.isBetterThan(state.bestResult, params.optimizationTarget))
+                            if (currentResult.isBetterThan(state.bestResult, params.optimizationTarget))
                             {
                                 state.bestResult = currentResult;
                                 state.bestModel = state.currentModel;
@@ -1052,8 +1051,9 @@ namespace gtasa_taxi_sim
         }
 
         template <typename RngT>
-        [[nodiscard]] bool optimizeSingleBatchMultiThread(
+        [[nodiscard]] bool optimizeOnceMultiThread(
             const OptimizationParameters& params,
+            const SimulationResult& currentBestResult,
             SimulationResult& currentResult,
             double temperature,
             std::vector<RngT>& rngs)
@@ -1077,11 +1077,9 @@ namespace gtasa_taxi_sim
                 rngs
             );
 
-            if (newResult.isBetterThan(currentResult, params.optimizationTarget, temperature))
+            if (newResult.isBetterThan(currentBestResult, params.optimizationTarget, temperature))
             {
                 currentResult = newResult;
-
-                return true;
             }
             else
             {
@@ -1092,13 +1090,12 @@ namespace gtasa_taxi_sim
                     (void)toggleFare(location, fare);
                 }
             }
-
-            return false;
         }
 
         template <typename RngT>
-        [[nodiscard]] bool optimizeSingleBatchSingleThread(
+        [[nodiscard]] void optimizeOnceSingleThread(
             const OptimizationParameters& params,
+            const SimulationResult& currentBestResult,
             SimulationResult& currentResult,
             double temperature,
             RngT& rng)
@@ -1120,11 +1117,9 @@ namespace gtasa_taxi_sim
                 rng
             );
 
-            if (newResult.isBetterThan(currentResult, params.optimizationTarget, temperature))
+            if (newResult.isBetterThan(currentBestResult, params.optimizationTarget, temperature))
             {
                 currentResult = newResult;
-
-                return true;
             }
             else
             {
@@ -1135,8 +1130,6 @@ namespace gtasa_taxi_sim
                     (void)toggleFare(location, fare);
                 }
             }
-
-            return false;
         }
 
         // This operation is reversible with the same parameters.
@@ -1265,9 +1258,10 @@ namespace gtasa_taxi_sim
         constexpr double maxY = 600.0;
         constexpr double minFareSearchTime = 4.0;
         constexpr double maxFareSearchTime = 10.0;
-        constexpr double minDistanceMultiplier = 0.8;
-        constexpr double maxDistanceMultiplier = 1.2;
+        constexpr double minDistanceMultiplier = 0.7;
+        constexpr double maxDistanceMultiplier = 1.3;
         constexpr double drivingSpeed = 40.0;
+        constexpr double minDrivingTime = 10.0;
 
         auto randomPoint = [&]()
         {
@@ -1298,7 +1292,7 @@ namespace gtasa_taxi_sim
                 const double dm = std::uniform_real_distribution<double>(minDistanceMultiplier, maxDistanceMultiplier)(rng);
                 const double rawDistance = distance(locationPoints[from], locationPoints[to]);
                 const double distance = rawDistance * dm;
-                const Seconds fareTime = Seconds{ distance / drivingSpeed };
+                const Seconds fareTime = Seconds{ distance / drivingSpeed + minDrivingTime };
 
                 model.addFare(from, Fare{ fareTime, to });
             }
