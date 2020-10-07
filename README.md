@@ -71,7 +71,7 @@ means that the game can generate a fare from Ganton to Docks which takes on aver
 
 This file can represent the parameters used for the optimization. It's structure is similar to .model files. Currently the following options are available.
 
-`seed` - An integer in range 0..2^64-1 to use as a seed to the pseudo random number generator. Different seeds will yield different optimization paths. If ommited then current time will be used.
+`seed` - An integer in range 0..2^64-1 to use as a seed to the pseudo random number generator. Different seeds will yield different optimization paths. If ommited then current time will be used. Fixed seed gives deterministic results only with num_threads equal to 1.
 
 `start_temperature` - the optimizer uses simulated annealing. Starting temperature of 1.3 means that it will allow solutions at most 1.3 tomes worse than the previous one at the start.
 
@@ -96,6 +96,10 @@ This file can represent the parameters used for the optimization. It's structure
 `optimization_target` - What result should be optimizied. [avg/min/max]
 
 `outliers_pct` - A value in range [0..1]. It signifies the number of outliers to remove before aggregating the simulation results. Removal is performed on job level, not after all threads complete the simulations.
+
+`num_consecutive_fails_to_restore_global_best_state` - The number of batches that need to fail to beat the best global model, one after the other, before the best global model is restored as the current model.
+
+`num_batches_between_local_best_state_restore` - The number of batches that will be done inbetween resetting the current state to the best one for its thread.
 
 The default settings are
 

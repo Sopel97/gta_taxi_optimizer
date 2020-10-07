@@ -300,7 +300,7 @@ namespace gtasa_taxi_sim
     struct OptimizationParameters
     {
     private:
-        // Seed to use for the PRNG.
+        // Seed to use for the PRNG. Fixed seed gives deterministic results only with num_threads equal to 1.
         std::optional<std::uint64_t> m_seed = std::nullopt;
 
     public:
@@ -344,7 +344,7 @@ namespace gtasa_taxi_sim
 
         // Number of startTemperature -> endTemperature
         // cycles to finish.
-        std::uint64_t numBatches = 10;
+        std::uint64_t numBatches = 100;
 
         // Number of optimization steps (model permutations)
         // within a single batch.
@@ -370,8 +370,13 @@ namespace gtasa_taxi_sim
         // complete the simulations.
         double outliersPct = 0.0;
 
+        // The number of batches that need to fail to beat the best
+        // global model, one after the other, before the best global
+        // model is restored as the current model.
         std::uint64_t numConsecutiveFailsToRestoreGlobalBestState = 20;
 
+        // The number of batches that will be done inbetween resetting
+        // the current state to the best one for its thread.
         std::uint64_t numBatchesBetweenLocalBestStateRestore = 2;
 
         [[nodiscard]] static OptimizationParameters fromStream(std::istream& in)
@@ -437,6 +442,14 @@ namespace gtasa_taxi_sim
                 else if (token == "outliers_pct"sv)
                 {
                     in >> params.outliersPct;
+                }
+                else if (token == "num_consecutive_fails_to_restore_global_best_state"sv)
+                {
+                    in >> params.numConsecutiveFailsToRestoreGlobalBestState;
+                }
+                else if (token == "num_batches_between_local_best_state_restore"sv)
+                {
+                    in >> params.numBatchesBetweenLocalBestStateRestore;
                 }
                 else
                 {
@@ -699,8 +712,8 @@ namespace gtasa_taxi_sim
             return { fares[fareId], fareId < m_numEnabledFares[from] };
         }
 
-        // Tries to find a set of fares that minimizes the average
-        // simulation time.
+        // Tries to find a set of fares that minimizes the selected
+        // target (one of min/max/avg time)
         // Uses simple simulation annealing.
         template <typename RngT = std::mt19937_64, typename SeedRngT = std::mt19937_64>
         void optimize(const OptimizationParameters& params, std::ostream& report)
