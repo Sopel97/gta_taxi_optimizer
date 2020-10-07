@@ -116,4 +116,6 @@ min_toggled_fares 1
 max_toggled_fares 1
 optimization_target avg
 outliers_pct 0.0
+num_consecutive_fails_to_restore_global_best_state 20
+num_batches_between_local_best_state_restore 2
 ```
