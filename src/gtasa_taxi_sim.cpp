@@ -625,17 +625,19 @@ namespace gtasa_taxi_sim
             LocationId currentLocation = startLocation;
             for (int i = 0; i < numFares; ++i)
             {
-                result.totalTime += avgNextFareSearchTime(currentLocation);
-
-                const auto& [fare, isAllowed] = chooseRandomFare(currentLocation, rng);
-
-                if (!isAllowed)
+                for (;;)
                 {
-                    continue;
-                }
+                    result.totalTime += avgNextFareSearchTime(currentLocation);
 
-                result.totalTime += fare.avgDriveTime();
-                currentLocation = fare.destination();
+                    const auto& [fare, isAllowed] = chooseRandomFare(currentLocation, rng);
+
+                    if (!isAllowed)
+                    {
+                        result.totalTime += fare.avgDriveTime();
+                        currentLocation = fare.destination();
+                        break;
+                    }
+                }
             }
 
             result.averageTime = result.totalTime;
