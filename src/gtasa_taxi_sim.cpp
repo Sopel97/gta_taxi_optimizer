@@ -87,6 +87,7 @@ namespace gtasa_taxi_sim
     using LocationId = std::uint32_t;
     using FareId = std::uint32_t;
 
+    // Based on xorishiro128++
     struct alignas(64) Xoroshiro128_32
     {
         static constexpr std::size_t bufferSize = 1024;
@@ -150,6 +151,16 @@ namespace gtasa_taxi_sim
                 add_eq_128_epi32(&buffer[i + 4], &s[0][4], &s[3][4]);
                 add_eq_128_epi32(&buffer[i + 8], &s[0][8], &s[3][8]);
                 add_eq_128_epi32(&buffer[i + 12], &s[0][12], &s[3][12]);
+
+                rotl_eq_128_epi32(&buffer[i], 7);
+                rotl_eq_128_epi32(&buffer[i + 4], 7);
+                rotl_eq_128_epi32(&buffer[i + 8], 7);
+                rotl_eq_128_epi32(&buffer[i + 12], 7);
+
+                add_eq_128_epi32(&buffer[i], &s[0][0]);
+                add_eq_128_epi32(&buffer[i + 4], &s[0][4]);
+                add_eq_128_epi32(&buffer[i + 8], &s[0][8]);
+                add_eq_128_epi32(&buffer[i + 12], &s[0][12]);
 
                 slli_eq_128_epi32(&t[0], &s[1][0], 9);
                 slli_eq_128_epi32(&t[4], &s[1][4], 9);
