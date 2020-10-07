@@ -731,6 +731,8 @@ namespace gtasa_taxi_sim
         template <typename RngT = std::mt19937_64, typename SeedRngT = std::mt19937_64>
         void optimize(const OptimizationParameters& params, std::ostream& report)
         {
+            updateFareLocationDistribution();
+
             const std::uint64_t numThreads = params.safeNumThreads();
 
             auto nextSeed = [rng = SeedRngT(params.getSeed())]() mutable {
@@ -1070,8 +1072,6 @@ namespace gtasa_taxi_sim
                 toggledFares.emplace_back(toggleRandomFare(rng));
             }
 
-            updateFareLocationDistribution();
-
             SimulationResult newResult = simulateFaresMultiThread(
                 params,
                 rngs
@@ -1115,8 +1115,6 @@ namespace gtasa_taxi_sim
                 toggledFares.emplace_back(toggleRandomFare(rng));
             }
 
-            updateFareLocationDistribution();
-
             SimulationResult newResult = simulateFaresSingleThread(
                 params,
                 rng
@@ -1124,16 +1122,18 @@ namespace gtasa_taxi_sim
 
             if (newResult.isBetterThan(currentResult, params.optimizationTarget, temperature))
             {
+                currentResult = newResult;
+
+                return true;
+            }
+            else
+            {
                 // Fares have to be toggled back in the reverse order.
                 for (std::uint64_t i = numFaresToToggle - 1; i < numFaresToToggle; --i)
                 {
                     auto& [location, fare] = toggledFares[i];
                     (void)toggleFare(location, fare);
                 }
-
-                currentResult = newResult;
-
-                return true;
             }
 
             return false;
