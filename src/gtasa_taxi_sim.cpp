@@ -247,6 +247,11 @@ namespace gtasa_taxi_sim
         }
     }
 
+    [[nodiscard]] std::uint64_t ceilDiv(std::uint64_t lhs, std::uint64_t rhs)
+    {
+        return (lhs + rhs - 1) / rhs;
+    }
+
     struct SimulationResult
     {
         Seconds totalTime{ 0.0 };
@@ -365,7 +370,9 @@ namespace gtasa_taxi_sim
         // complete the simulations.
         double outliersPct = 0.0;
 
-        std::uint64_t numFailsToLoadGlobalBestState = 20;
+        std::uint64_t numConsecutiveFailsToRestoreGlobalBestState = 20;
+
+        std::uint64_t numBatchesBetweenLocalBestStateRestore = 2;
 
         [[nodiscard]] static OptimizationParameters fromStream(std::istream& in)
         {
@@ -692,71 +699,6 @@ namespace gtasa_taxi_sim
             return { fares[fareId], fareId < m_numEnabledFares[from] };
         }
 
-        /*
-        // Tries to find a set of fares that minimizes the average
-        // simulation time.
-        // Uses simple simulation annealing.
-        template <typename RngT = std::mt19937_64>
-        void optimize(const OptimizationParameters& params, std::ostream& report)
-        {
-            const std::uint64_t numThreads = params.safeNumThreads();
-
-            auto nextSeed = [rng = RngT(params.getSeed())] () mutable {
-                return rng() * 6364136223846793005ull;
-            };
-
-            RngT rng(nextSeed());
-
-            std::vector<RngT> threadRngs;
-            for (std::uint64_t i = 0; i < numThreads - 1; ++i)
-            {
-                threadRngs.emplace_back(nextSeed());
-            }
-
-            auto currentResult = simulateFares(
-                params,
-                rng,
-                threadRngs
-            );
-            auto bestResult = currentResult;
-            auto bestState = *this;
-
-            for (std::uint64_t batchId = 0; batchId < params.numBatches; ++batchId)
-            {
-                for (std::uint64_t i = 0; i < params.numTemperatureStages; ++i)
-                {
-                    const double t = static_cast<double>(i) / (params.numTemperatureStages - 1);
-
-                    const double temperature =
-                        t > params.endTemperatureAfter
-                        ? params.endTemperature
-                        : (params.endTemperatureAfter - t) / params.endTemperatureAfter * params.startTemperature + t * params.endTemperature;
-
-                    const bool improved = optimizeSingleBatch<RngT>(
-                        params,
-                        currentResult,
-                        temperature,
-                        rng,
-                        threadRngs
-                        );
-
-                    if (improved)
-                    {
-                        if (currentResult.isBetterThan(bestResult, params.optimizationTarget))
-                        {
-                            bestResult = currentResult;
-                            bestState = *this;
-
-                            report << "New best: " << currentResult.toString() << "\n";
-                        }
-                    }
-                }
-
-                *this = bestState;
-            }
-        }
-        */
-
         // Tries to find a set of fares that minimizes the average
         // simulation time.
         // Uses simple simulation annealing.
@@ -775,16 +717,20 @@ namespace gtasa_taxi_sim
                 rngs.emplace_back(nextSeed());
             }
 
-            auto currentResult = simulateFaresMultiThread(
+            const auto initialResult = simulateFaresMultiThread(
                 params,
                 rngs
             );
 
-            auto bestResult = currentResult;
-            auto bestState = *this;
-
             struct ThreadState
             {
+                ThreadState(const Model& current, const Model& best, const SimulationResult& bestResult) :
+                    currentModel(current),
+                    bestModel(best),
+                    bestResult(bestResult)
+                {
+                }
+
                 Model currentModel;
                 Model bestModel;
                 SimulationResult bestResult;
@@ -794,13 +740,17 @@ namespace gtasa_taxi_sim
             states.reserve(numThreads);
             for (int i = 0; i < numThreads; ++i)
             {
-                states.emplace_back(ThreadState{*this, *this, currentResult});
+                states.emplace_back(*this, *this, initialResult);
             }
 
-            std::mutex bestMutex;
-            std::vector<std::future<void>> taskCompletions;
+            std::mutex globalBestStateMutex;
+            std::vector<std::future<void>> taskFutures;
+            taskFutures.reserve(numThreads);
 
-            const std::uint64_t jobSize = params.numBatches / numThreads + 1;
+            auto globalBestResult = initialResult;
+            auto globalBestModel = *this;
+
+            const std::uint64_t jobSize = ceilDiv(params.numBatches, numThreads);
 
             for (int i = 0; i < numThreads; ++i)
             {
@@ -808,8 +758,22 @@ namespace gtasa_taxi_sim
                 auto& rng = rngs[i];
                 auto& state = states[i];
 
-                auto task = [i, jobSize, &report, &rng, &bestMutex, &state, &bestResult, &bestState, &params, currentResult]() mutable {
-                    std::uint64_t numFails = 0;
+                auto task = 
+                    [
+                        i, 
+                        jobSize, 
+                        &report, 
+                        &rng, 
+                        &globalBestStateMutex, 
+                        &state, 
+                        &globalBestResult, 
+                        &globalBestModel, 
+                        &params, 
+                        currentResult = initialResult
+                    ]() mutable 
+                {
+                    std::uint64_t numConsecutiveFails = 0;
+
                     for (std::uint64_t batchId = 0; batchId < jobSize; ++batchId)
                     {
                         for (std::uint64_t i = 0; i < params.numTemperatureStages; ++i)
@@ -828,44 +792,49 @@ namespace gtasa_taxi_sim
                                 rng
                                 );
 
-                            ++numFails;
-
+                            ++numConsecutiveFails;
+                            
+                            // We gate the expensive stuff behind `improved` and local
+                            // best comparision to lock the mutex as rarely as possible.
                             if (improved && currentResult.isBetterThan(state.bestResult, params.optimizationTarget))
                             {
                                 state.bestResult = currentResult;
                                 state.bestModel = state.currentModel;
 
-                                std::unique_lock lock(bestMutex);
+                                std::unique_lock lock(globalBestStateMutex);
 
-                                if (currentResult.isBetterThan(bestResult, params.optimizationTarget))
+                                if (currentResult.isBetterThan(globalBestResult, params.optimizationTarget))
                                 {
-                                    bestResult = currentResult;
-                                    bestState = state.currentModel;
+                                    globalBestResult = currentResult;
+                                    globalBestModel = state.currentModel;
 
                                     report << "New best: " << currentResult.toString() << "\n";
 
-                                    numFails = 0;
+                                    numConsecutiveFails = 0;
                                 }
                             }
                         }
 
-                        if (numFails == params.numFailsToLoadGlobalBestState)
+                        if (numConsecutiveFails == params.numConsecutiveFailsToRestoreGlobalBestState)
                         {
-                            std::unique_lock lock(bestMutex);
+                            std::unique_lock lock(globalBestStateMutex);
 
                             state.currentModel = state.bestModel;
-                            currentResult = bestResult;
+                            currentResult = globalBestResult;
 
-                            state.bestModel = bestState;
-                            state.bestResult = bestResult;
+                            state.bestModel = globalBestModel;
+                            state.bestResult = globalBestResult;
 
-                            numFails = 0;
+                            numConsecutiveFails = 0;
                         }
-                        else
+                        else if ((batchId + 1) % params.numBatchesBetweenLocalBestStateRestore == 0)
                         {
                             state.currentModel = state.bestModel;
                             currentResult = state.bestResult;
                         }
+
+                        // Sometimes we want to continue with the old state
+                        // even if it's not the best we have.
                     }
                 };
 
@@ -875,16 +844,16 @@ namespace gtasa_taxi_sim
                 }
                 else
                 {
-                    taskCompletions.emplace_back(std::async(std::launch::async, task));
+                    taskFutures.emplace_back(std::async(std::launch::async, task));
                 }
             }
 
-            for (auto& f : taskCompletions)
+            for (auto& f : taskFutures)
             {
                 f.wait();
             }
 
-            *this = bestState;
+            *this = globalBestModel;
         }
 
         void print(std::ostream& = std::cout) const
@@ -1000,7 +969,7 @@ namespace gtasa_taxi_sim
             std::vector<RngT>& rngs)
         {
             const std::uint64_t numThreads = params.safeNumThreads();
-            const std::uint64_t jobSize = params.numAveragedSimulations / numThreads + 1;
+            const std::uint64_t jobSize = ceilDiv(params.numAveragedSimulations, numThreads);
 
             SimulationResult newResult;
             std::vector<std::future<SimulationResult>> threadResults;
