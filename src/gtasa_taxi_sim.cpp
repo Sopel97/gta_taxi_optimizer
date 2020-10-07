@@ -87,7 +87,7 @@ namespace gtasa_taxi_sim
     using LocationId = std::uint32_t;
     using FareId = std::uint32_t;
 
-    struct alignas(64) Xoroshiro256
+    struct alignas(64) Xoroshiro128_32
     {
         static constexpr std::size_t bufferSize = 1024;
         static constexpr std::size_t unrollSize = 16;
@@ -107,7 +107,7 @@ namespace gtasa_taxi_sim
             return std::numeric_limits<std::uint32_t>::max();
         }
 
-        Xoroshiro256(std::uint64_t seed)
+        Xoroshiro128_32(std::uint64_t seed)
         {
             init(seed);
         }
@@ -1306,7 +1306,7 @@ namespace gtasa_taxi_sim
         const auto config = loadOptimizationParameters(configPath);
         auto model = loadModelFromFile(inputModelPath);
 
-        model.optimize<Xoroshiro256>(config, std::cout);
+        model.optimize<Xoroshiro128_32>(config, std::cout);
 
         std::ofstream outfile(outputModelPath);
         model.saveToStream(outfile);
