@@ -1079,16 +1079,18 @@ namespace gtasa_taxi_sim
 
             if (newResult.isBetterThan(currentResult, params.optimizationTarget, temperature))
             {
+                currentResult = newResult;
+
+                return true;
+            }
+            else
+            {
                 // Fares have to be toggled back in the reverse order.
                 for (std::uint64_t i = numFaresToToggle - 1; i < numFaresToToggle; --i)
                 {
                     auto& [location, fare] = toggledFares[i];
                     (void)toggleFare(location, fare);
                 }
-
-                currentResult = newResult;
-
-                return true;
             }
 
             return false;
