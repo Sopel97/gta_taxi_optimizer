@@ -760,12 +760,12 @@ namespace gtasa_taxi_sim
         // Tries to find a set of fares that minimizes the average
         // simulation time.
         // Uses simple simulation annealing.
-        template <typename RngT = std::mt19937_64>
+        template <typename RngT = std::mt19937_64, typename SeedRngT = std::mt19937_64>
         void optimize(const OptimizationParameters& params, std::ostream& report)
         {
             const std::uint64_t numThreads = params.safeNumThreads();
 
-            auto nextSeed = [rng = RngT(params.getSeed())]() mutable {
+            auto nextSeed = [rng = SeedRngT(params.getSeed())]() mutable {
                 return rng() * 6364136223846793005ull;
             };
 
