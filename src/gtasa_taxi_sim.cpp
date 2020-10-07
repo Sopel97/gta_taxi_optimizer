@@ -769,18 +769,15 @@ namespace gtasa_taxi_sim
                 return rng() * 6364136223846793005ull;
             };
 
-            RngT rng(nextSeed());
-
-            std::vector<RngT> threadRngs;
-            for (std::uint64_t i = 0; i < numThreads - 1; ++i)
+            std::vector<RngT> rngs;
+            for (std::uint64_t i = 0; i < numThreads; ++i)
             {
-                threadRngs.emplace_back(nextSeed());
+                rngs.emplace_back(nextSeed());
             }
 
             auto currentResult = simulateFaresMultiThread(
                 params,
-                rng,
-                threadRngs
+                rngs
             );
 
             auto bestResult = currentResult;
@@ -808,10 +805,10 @@ namespace gtasa_taxi_sim
             for (int i = 0; i < numThreads; ++i)
             {
                 const bool isLast = i == numThreads - 1;
-                auto& hereRng = isLast ? rng : threadRngs[i];
+                auto& rng = rngs[i];
                 auto& state = states[i];
 
-                auto task = [i, jobSize, &report, &rng = hereRng, &bestMutex, &state, &bestResult, &bestState, &params, currentResult]() mutable {
+                auto task = [i, jobSize, &report, &rng, &bestMutex, &state, &bestResult, &bestState, &params, currentResult]() mutable {
                     std::uint64_t numFails = 0;
                     for (std::uint64_t batchId = 0; batchId < jobSize; ++batchId)
                     {
@@ -1000,8 +997,7 @@ namespace gtasa_taxi_sim
         template <typename RngT>
         [[nodiscard]] SimulationResult simulateFaresMultiThread(
             const OptimizationParameters& params, 
-            RngT& rng, 
-            std::vector<RngT>& threadRngs)
+            std::vector<RngT>& rngs)
         {
             const std::uint64_t numThreads = params.safeNumThreads();
             const std::uint64_t jobSize = params.numAveragedSimulations / numThreads + 1;
@@ -1011,15 +1007,15 @@ namespace gtasa_taxi_sim
             for (std::uint64_t i = 0; i < numThreads; ++i)
             {
                 const bool isLast = i == numThreads - 1;
-                auto& hereRng = isLast ? rng : threadRngs[i];
+                auto& rng = rngs[i];
 
-                auto job = [this, i, jobSize, &hereRng, &params]() {
+                auto job = [this, i, jobSize, &rng, &params]() {
                     return simulateFaresSingleThread(
                         params.optimizationTarget,
                         params.outliersPct,
                         params.numFaresToComplete,
                         jobSize,
-                        hereRng
+                        rng
                     );
                 };
 
@@ -1063,9 +1059,10 @@ namespace gtasa_taxi_sim
             const OptimizationParameters& params,
             SimulationResult& currentResult,
             double temperature,
-            RngT& rng,
-            std::vector<RngT>& threadRngs)
+            std::vector<RngT>& rngs)
         {
+            auto& rng = rngs.front();
+
             const std::uint64_t numFaresToToggle =
                 std::uniform_int_distribution<std::uint64_t>(
                     params.minToggledFares,
@@ -1082,8 +1079,7 @@ namespace gtasa_taxi_sim
 
             SimulationResult newResult = simulateFaresMultiThread(
                 params,
-                rng,
-                threadRngs
+                rngs
             );
 
             if (newResult.isBetterThan(currentResult, params.optimizationTarget, temperature))
