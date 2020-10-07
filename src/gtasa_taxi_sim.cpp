@@ -690,6 +690,7 @@ namespace gtasa_taxi_sim
             return { fares[fareId], fareId < m_numEnabledFares[from] };
         }
 
+
         // Tries to find a set of fares that minimizes the average
         // simulation time.
         // Uses simple simulation annealing.
@@ -710,12 +711,12 @@ namespace gtasa_taxi_sim
                 threadRngs.emplace_back(nextSeed());
             }
 
-            auto prevResult = simulateFares(
+            auto currentResult = simulateFares(
                 params,
                 rng,
                 threadRngs
             );
-            auto bestResult = prevResult;
+            auto bestResult = currentResult;
             auto bestState = *this;
 
             for (std::uint64_t batchId = 0; batchId < params.numBatches; ++batchId)
@@ -729,23 +730,24 @@ namespace gtasa_taxi_sim
                         ? params.endTemperature
                         : (params.endTemperatureAfter - t) / params.endTemperatureAfter * params.startTemperature + t * params.endTemperature;
 
-                    auto newResult = optimizeSingleBatch<RngT>(
+                    const bool improved = optimizeSingleBatch<RngT>(
                         params,
-                        prevResult,
+                        currentResult,
                         temperature,
                         rng,
                         threadRngs
                         );
 
-                    if (newResult.isBetterThan(bestResult, params.optimizationTarget))
+                    if (improved)
                     {
-                        bestResult = newResult;
-                        bestState = *this;
+                        if (currentResult.isBetterThan(bestResult, params.optimizationTarget))
+                        {
+                            bestResult = currentResult;
+                            bestState = *this;
 
-                        report << "New best: " << newResult.toString() << "\n";
+                            report << "New best: " << currentResult.toString() << "\n";
+                        }
                     }
-
-                    prevResult = newResult;
                 }
 
                 *this = bestState;
@@ -907,9 +909,9 @@ namespace gtasa_taxi_sim
         }
 
         template <typename RngT>
-        [[nodiscard]] SimulationResult optimizeSingleBatch(
+        [[nodiscard]] bool optimizeSingleBatch(
             const OptimizationParameters& params,
-            const SimulationResult& prevResult,
+            SimulationResult& currentResult,
             double temperature,
             RngT& rng,
             std::vector<RngT>& threadRngs)
@@ -934,7 +936,7 @@ namespace gtasa_taxi_sim
                 threadRngs
             );
 
-            if (newResult.isBetterThan(prevResult, params.optimizationTarget, temperature))
+            if (newResult.isBetterThan(currentResult, params.optimizationTarget, temperature))
             {
                 // Fares have to be toggled back in the reverse order.
                 for (std::uint64_t i = numFaresToToggle - 1; i < numFaresToToggle; --i)
@@ -942,9 +944,13 @@ namespace gtasa_taxi_sim
                     auto& [location, fare] = toggledFares[i];
                     (void)toggleFare(location, fare);
                 }
+
+                currentResult = newResult;
+
+                return true;
             }
 
-            return newResult;
+            return false;
         }
 
         // This operation is reversible with the same parameters.
